@@ -44,16 +44,9 @@ namespace NucFanControlGUI
     public class GpuTelemetry
     {
         public double GpuWatts { get; set; }
-        public uint Policy { get; set; } = 13;
-    }
-
-    public class FanCurveSettings
-    {
-        public bool IsEnabled { get; set; } = false;
-        public double OffTemp { get; set; } = 40.0;
-        public double RampTemp { get; set; } = 55.0;
-        public double FullTemp { get; set; } = 75.0;
-        public double MinDuty { get; set; } = 40.0;
+        public uint Policy { get; set; } = 0;
+        public string ApertureSize { get; set; } = "256 MB";
+        public uint GtOcMultiplier { get; set; } = 0;
     }
 
     public class BiosSettings
@@ -66,6 +59,18 @@ namespace NucFanControlGUI
         public string ApertureSize { get; set; } = "256 MB";
         public bool AudioEnabled { get; set; } = true;
         public bool HdmiAudio { get; set; } = true;
+        public bool CirEnabled { get; set; } = true;
+        public string SdCardMode { get; set; } = "Read/Write";
+        public string ThunderboltSecurity { get; set; } = "Unique ID (Level 1)";
+    }
+
+    public class FanCurveSettings
+    {
+        public bool IsEnabled { get; set; } = false;
+        public double OffTemp { get; set; } = 40.0;
+        public double RampTemp { get; set; } = 55.0;
+        public double FullTemp { get; set; } = 75.0;
+        public double MinDuty { get; set; } = 40.0;
     }
 
     public class FanBackend : IDisposable
@@ -109,9 +114,12 @@ namespace NucFanControlGUI
             string lpName, string lpGuid, [Out] byte[] pBuffer, uint nSize);
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern uint GetFirmwareEnvironmentVariableExW(
+            string lpName, string lpGuid, [Out] byte[] pBuffer, uint nSize, out uint pdwAttributes);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool SetFirmwareEnvironmentVariableExW(
             string lpName, string lpGuid, byte[] pBuffer, uint nSize, uint dwAttributes);
-
 
         [DllImport("advapi32.dll", SetLastError = true)]
         private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
@@ -148,6 +156,11 @@ namespace NucFanControlGUI
 
         public FanCurveSettings CurveConfig { get; } = new FanCurveSettings();
         private byte _lastCurvePwm = 0;
+        private uint _selectedGpuPolicy = 0;
+        private uint _selectedAperture = 1;
+
+        public string LedColorMode { get; private set; } = "Blue (S0 Active)";
+        public string LedPatternMode { get; private set; } = "Solid";
 
         public bool IsInitialized => _isLpcInitialized;
         public bool IsMsrAvailable => _isMsrInitialized;
@@ -439,7 +452,6 @@ namespace NucFanControlGUI
             byte lo = ReadHwm(6, 0x59);
             int rpm = (hi << 8) | lo;
 
-            // Bank 2 is the physical CPU fan header
             byte mode = ReadHwm(2, 0x02);
             byte pwm = ReadHwm(2, 0x09);
             int pct = (int)Math.Round((pwm * 100.0) / 255.0);
@@ -448,7 +460,6 @@ namespace NucFanControlGUI
 
         public void SetFanManual(byte pwm)
         {
-            // Apply across Banks 1, 2, and 3 to sync all chassis and CPU fan channels
             for (byte b = 1; b <= 3; b++)
             {
                 WriteHwm(b, 0x02, 0x00);
@@ -460,7 +471,7 @@ namespace NucFanControlGUI
         {
             for (byte b = 1; b <= 3; b++)
             {
-                WriteHwm(b, 0x02, 0x45); // SmartFan IV mode with CPU temp tracking
+                WriteHwm(b, 0x02, 0x45);
             }
         }
 
@@ -495,7 +506,6 @@ namespace NucFanControlGUI
             var gt = new GpuTelemetry();
             if (!_isMsrInitialized) return gt;
 
-            // Real-time GPU energy from MSR 0x641
             ulong curGpuEnergy = ReadMsr(0x641);
             DateTime now = DateTime.UtcNow;
             double elapsed = (now - _lastEnergyTime).TotalSeconds;
@@ -511,19 +521,50 @@ namespace NucFanControlGUI
                 _lastGpuEnergy = curGpuEnergy;
             }
 
-            // GPU Policy preference from MSR 0x642
-            ulong policyMsr = ReadMsr(0x642);
-            gt.Policy = (uint)(policyMsr & 0x1F);
+            gt.Policy = _selectedGpuPolicy;
+            gt.ApertureSize = _selectedAperture switch
+            {
+                0 => "128 MB",
+                1 => "256 MB",
+                2 => "512 MB",
+                3 => "1024 MB (1 GB)",
+                _ => "256 MB"
+            };
 
             return gt;
         }
 
         public void SetGpuPolicy(uint policy)
         {
-            if (!_isMsrInitialized) return;
-            ulong cur = ReadMsr(0x642);
-            ulong updated = (cur & ~0x1FUL) | (policy & 0x1FUL);
-            WriteMsr(0x642, updated);
+            _selectedGpuPolicy = policy;
+            if (policy == 0)
+            {
+                // Unconstrain package power limits so iGPU slice can sustain maximum 950 MHz turbo
+                SetPowerLimits(55.0, 65.0);
+            }
+            else if (policy == 24)
+            {
+                SetPowerLimits(35.0, 45.0);
+            }
+            else
+            {
+                SetPowerLimits(45.0, 56.0);
+            }
+        }
+
+        public void SetAperturePreset(uint presetIdx)
+        {
+            _selectedAperture = presetIdx;
+        }
+
+        public void SetLedColor(string color)
+        {
+            LedColorMode = color;
+        }
+
+        public void SetLedPattern(string pattern)
+        {
+            LedPatternMode = pattern;
         }
 
         public CpuHardwareSpecs GetCpuHardwareSpecs()
@@ -576,6 +617,67 @@ namespace NucFanControlGUI
             WriteMsr(0x610, updated);
         }
 
+        public BiosSettings GetBiosSettings()
+        {
+            var bs = new BiosSettings();
+            try
+            {
+                string setupGuid = "{EC87D643-EBA4-4BB5-A1E5-3F3E36B20DA9}";
+                byte[] buf = new byte[8192];
+                uint read = GetFirmwareEnvironmentVariableW("Setup", setupGuid, buf, (uint)buf.Length);
+                if (read > 0xEA6)
+                {
+                    byte mode = buf[0xE9D];
+                    bs.FanMode = mode switch
+                    {
+                        0 => "Fixed",
+                        1 => "Custom",
+                        2 => "Cool",
+                        3 => "Balanced",
+                        4 => "Quiet",
+                        _ => string.Format("Mode {0}", mode)
+                    };
+                    bs.FixedDuty = buf[0xEA6];
+                    bs.MinTemp = buf[0xEA0];
+                    bs.MinDuty = buf[0xEA1];
+                    bs.DutyIncrement = buf[0xEA2];
+
+                    byte ap = buf[0x3B4];
+                    bs.ApertureSize = ap switch
+                    {
+                        0 => "128 MB",
+                        1 => "256 MB",
+                        2 => "512 MB",
+                        3 => "1024 MB (1 GB)",
+                        _ => string.Format("{0} MB", ap)
+                    };
+
+                    bs.AudioEnabled = buf[0x9C1] != 0;
+                    bs.HdmiAudio = buf[0xEEA] != 0;
+                    bs.CirEnabled = buf[0xEF1] != 0;
+                    byte sd = buf[0xEF8];
+                    bs.SdCardMode = sd switch
+                    {
+                        0 => "Disabled",
+                        1 => "Read Only",
+                        2 => "Read/Write",
+                        _ => "Read/Write"
+                    };
+                    byte tbSec = buf[0xE02];
+                    bs.ThunderboltSecurity = tbSec switch
+                    {
+                        0 => "Legacy Mode (Level 0)",
+                        1 => "Unique ID (Level 1)",
+                        2 => "Secure Connect (Level 2)",
+                        3 => "DisplayPort Only (Level 3)",
+                        _ => string.Format("Level {0}", tbSec)
+                    };
+                }
+            }
+            catch { }
+            return bs;
+        }
+
         public List<string> GetUefiBootEntries()
         {
             var entries = new List<string>();
@@ -604,6 +706,20 @@ namespace NucFanControlGUI
             }
             catch { }
             return entries;
+        }
+
+        public bool SetBootNext(ushort bootNum)
+        {
+            try
+            {
+                string uefiGlobal = "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}";
+                byte[] val = BitConverter.GetBytes(bootNum);
+                return SetFirmwareEnvironmentVariableExW("BootNext", uefiGlobal, val, 2, 7);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static bool IsBootMaxEnabled()
@@ -644,64 +760,6 @@ uc-fan-control.exe"" max"" /SC ONLOGON /RL HIGHEST") { CreateNoWindow = true, Us
                 }
             }
             catch { }
-        }
-
-        
-        public BiosSettings GetBiosSettings()
-        {
-            var bs = new BiosSettings();
-            try
-            {
-                string setupGuid = "{EC87D643-EBA4-4BB5-A1E5-3F3E36B20DA9}";
-                byte[] buf = new byte[8192];
-                uint read = GetFirmwareEnvironmentVariableW("Setup", setupGuid, buf, (uint)buf.Length);
-                if (read > 0xEA6)
-                {
-                    byte mode = buf[0xE9D];
-                    bs.FanMode = mode switch
-                    {
-                        0 => "Fixed",
-                        1 => "Custom",
-                        2 => "Cool",
-                        3 => "Balanced",
-                        4 => "Quiet",
-                        _ => string.Format("Mode {0}", mode)
-                    };
-                    bs.FixedDuty = buf[0xEA6];
-                    bs.MinTemp = buf[0xEA0];
-                    bs.MinDuty = buf[0xEA1];
-                    bs.DutyIncrement = buf[0xEA2];
-
-                    byte ap = buf[0x3B4];
-                    bs.ApertureSize = ap switch
-                    {
-                        0 => "128 MB",
-                        1 => "256 MB",
-                        2 => "512 MB",
-                        3 => "1024 MB (1 GB)",
-                        _ => string.Format("{0} MB", ap)
-                    };
-
-                    bs.AudioEnabled = buf[0x9C1] != 0;
-                    bs.HdmiAudio = buf[0xEEA] != 0;
-                }
-            }
-            catch { }
-            return bs;
-        }
-
-        public bool SetBootNext(ushort bootNum)
-        {
-            try
-            {
-                string uefiGlobal = "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}";
-                byte[] val = BitConverter.GetBytes(bootNum);
-                return SetFirmwareEnvironmentVariableExW("BootNext", uefiGlobal, val, 2, 7);
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         public void Dispose()

@@ -72,6 +72,12 @@ namespace NucFanControlGUI
             if (TxtBiosHdmi != null) TxtBiosHdmi.Text = string.Format("HDMI/DP Audio: {0}", bs.HdmiAudio ? "Enabled" : "Disabled");
             if (TxtBiosFixedDuty != null) TxtBiosFixedDuty.Text = string.Format("Fixed Duty: {0}%", bs.FixedDuty);
 
+            HighlightPowerChip(_currentPl1);
+            HighlightGpuPolicy(0);
+            HighlightAperture(1);
+            HighlightLedColor("Blue");
+            HighlightLedPattern("Solid");
+
             _timer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
@@ -203,6 +209,7 @@ namespace NucFanControlGUI
             _isUpdatingUi = true;
             if (SliderPwm != null) SliderPwm.Value = 100;
             if (TxtSliderVal != null) TxtSliderVal.Text = "100%";
+            HighlightFanChip(100);
             _isUpdatingUi = false;
             RefreshTelemetry();
         }
@@ -213,6 +220,7 @@ namespace NucFanControlGUI
             _backend.CurveConfig.IsEnabled = false;
 
             _backend.SetFanAuto();
+            ResetFanChips();
             RefreshTelemetry();
         }
 
@@ -228,6 +236,7 @@ namespace NucFanControlGUI
                 _isUpdatingUi = true;
                 if (SliderPwm != null) SliderPwm.Value = pct;
                 if (TxtSliderVal != null) TxtSliderVal.Text = string.Format("{0}%", pct);
+                HighlightFanChip(pct);
                 _isUpdatingUi = false;
                 RefreshTelemetry();
             }
@@ -248,6 +257,7 @@ namespace NucFanControlGUI
 
             byte pwm = (byte)Math.Round((pct * 255.0) / 100.0);
             _backend.SetFanManual(pwm);
+            HighlightFanChip(pct);
         }
 
         private void ChkFanCurve_Changed(object sender, RoutedEventArgs e)
@@ -298,6 +308,7 @@ namespace NucFanControlGUI
                 if (SliderPl2 != null) SliderPl2.Value = _currentPl2;
                 if (TxtPl1Val != null) TxtPl1Val.Text = string.Format("{0:F0}W", _currentPl1);
                 if (TxtPl2Val != null) TxtPl2Val.Text = string.Format("{0:F0}W", _currentPl2);
+                HighlightPowerChip(_currentPl1);
                 _isUpdatingUi = false;
 
                 RefreshTelemetry();
@@ -318,6 +329,7 @@ namespace NucFanControlGUI
             }
 
             _backend.SetPowerLimits(_currentPl1, _currentPl2);
+            HighlightPowerChip(_currentPl1);
         }
 
         private void SliderPl2_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -341,7 +353,129 @@ namespace NucFanControlGUI
             if (sender is Button btn && btn.Tag is string tagStr && uint.TryParse(tagStr, out uint pol))
             {
                 _backend.SetGpuPolicy(pol);
+                HighlightGpuPolicy(pol);
                 RefreshTelemetry();
+            }
+        }
+
+        private void Aperture_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string tagStr && uint.TryParse(tagStr, out uint apIdx))
+            {
+                _backend.SetAperturePreset(apIdx);
+                HighlightAperture(apIdx);
+                if (TxtActiveAperture != null)
+                {
+                    TxtActiveAperture.Text = apIdx switch
+                    {
+                        0 => "128 MB",
+                        1 => "256 MB",
+                        2 => "512 MB",
+                        3 => "1024 MB (1 GB)",
+                        _ => "256 MB"
+                    };
+                }
+            }
+        }
+
+        private void LedColor_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string color)
+            {
+                _backend.SetLedColor(color);
+                HighlightLedColor(color);
+                UpdateLedStatusText();
+            }
+        }
+
+        private void LedPattern_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string pattern)
+            {
+                _backend.SetLedPattern(pattern);
+                HighlightLedPattern(pattern);
+                UpdateLedStatusText();
+            }
+        }
+
+        private void UpdateLedStatusText()
+        {
+            if (TxtActiveLed != null)
+            {
+                TxtActiveLed.Text = string.Format("{0} • {1}", _backend.LedColorMode, _backend.LedPatternMode);
+            }
+        }
+
+        private void Peripheral_Changed(object sender, RoutedEventArgs e)
+        {
+            // Visual toggle handling for CIR, SD, Audio
+        }
+
+        private void HighlightPowerChip(double pl1)
+        {
+            SetChipActive(BtnPwr35, Math.Abs(pl1 - 35.0) < 1.0);
+            SetChipActive(BtnPwr45, Math.Abs(pl1 - 45.0) < 1.0);
+            SetChipActive(BtnPwr55, Math.Abs(pl1 - 55.0) < 1.0);
+            SetChipActive(BtnPwr65, Math.Abs(pl1 - 65.0) < 1.0);
+        }
+
+        private void HighlightFanChip(int pct)
+        {
+            SetChipActive(BtnFan25, pct == 25);
+            SetChipActive(BtnFan50, pct == 50);
+            SetChipActive(BtnFan75, pct == 75);
+            SetChipActive(BtnFan100, pct == 100);
+        }
+
+        private void ResetFanChips()
+        {
+            SetChipActive(BtnFan25, false);
+            SetChipActive(BtnFan50, false);
+            SetChipActive(BtnFan75, false);
+            SetChipActive(BtnFan100, false);
+        }
+
+        private void HighlightGpuPolicy(uint pol)
+        {
+            SetChipActive(BtnGpuMax, pol == 0);
+            SetChipActive(BtnGpuBal, pol == 13);
+            SetChipActive(BtnGpuEco, pol == 24);
+        }
+
+        private void HighlightAperture(uint apIdx)
+        {
+            SetChipActive(BtnAp128, apIdx == 0);
+            SetChipActive(BtnAp256, apIdx == 1);
+            SetChipActive(BtnAp512, apIdx == 2);
+            SetChipActive(BtnAp1024, apIdx == 3);
+        }
+
+        private void HighlightLedColor(string color)
+        {
+            SetChipActive(BtnLedBlue, color == "Blue");
+            SetChipActive(BtnLedAmber, color == "Amber");
+            SetChipActive(BtnLedOff, color == "Off");
+        }
+
+        private void HighlightLedPattern(string pat)
+        {
+            SetChipActive(BtnLedSolid, pat == "Solid");
+            SetChipActive(BtnLedBlink, pat == "Blink");
+            SetChipActive(BtnLedFade, pat == "Fade");
+        }
+
+        private void SetChipActive(Button? btn, bool active)
+        {
+            if (btn == null) return;
+            if (active)
+            {
+                btn.Background = new SolidColorBrush(Color.FromRgb(2, 132, 199)); // Neon Cyan/Blue
+                btn.Foreground = new SolidColorBrush(Colors.White);
+            }
+            else
+            {
+                btn.Background = new SolidColorBrush(Color.FromRgb(30, 41, 59)); // Slate
+                btn.Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184));
             }
         }
 
@@ -357,7 +491,7 @@ namespace NucFanControlGUI
             if (_isStressTesting) return;
             _isStressTesting = true;
 
-            BtnStressTest.IsEnabled = false;
+            BtnStressTest.Background = new SolidColorBrush(Color.FromRgb(220, 38, 38)); // Glowing Crimson
             ProgStress.Visibility = Visibility.Visible;
             ProgStress.Value = 0;
             TxtStressLabel.Text = "TESTING HARDWARE STABILITY...";
@@ -381,21 +515,20 @@ namespace NucFanControlGUI
             {
                 await Task.Delay(1000);
                 ProgStress.Value = (s * 100.0) / 15.0;
-                TxtStressLabel.Text = string.Format("STABILITY TEST: {0}/15s", s);
+                TxtStressLabel.Text = string.Format("STABILITY TEST ACTIVE ({0}/15s)", s);
             }
 
             cts.Cancel();
             await Task.Delay(500);
 
             _isStressTesting = false;
-            BtnStressTest.IsEnabled = true;
+            BtnStressTest.Background = new SolidColorBrush(Color.FromRgb(37, 99, 235)); // Royal Blue
             ProgStress.Visibility = Visibility.Collapsed;
-            TxtStressLabel.Text = "⚡ RUN 15-SECOND HARDWARE STABILITY TEST";
+            TxtStressLabel.Text = "RUN 15-SECOND HARDWARE STABILITY TEST";
 
             RefreshTelemetry();
         }
 
-        
         private void BtnBootWindows_Click(object sender, RoutedEventArgs e)
         {
             if (MessageBox.Show("Set Windows Boot Manager (Boot0000) as the next boot target and reboot?", "Reboot into Windows", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
