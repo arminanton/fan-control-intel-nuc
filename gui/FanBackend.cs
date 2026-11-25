@@ -588,14 +588,78 @@ private uint _tjMax = 100;
             _selectedAperture = presetIdx;
         }
 
+        public void SetLedHardware(string color, string pattern)
+        {
+            if (_hLpc == null || _hLpc.IsInvalid) return;
+            try
+            {
+                WritePort(0x2E, 0x87); WritePort(0x2E, 0x87);
+
+                // Configure LDN 0x0B (Front Panel LED controller)
+                WritePort(0x2E, 0x07); WritePort(0x2F, 0x0B);
+
+                byte f5 = 0x10;
+                byte f6 = 0x00;
+                byte f7 = 0x40; // Default Blue
+                byte f8 = 0x00;
+
+                if (color == "Amber")
+                {
+                    f7 = 0x00;
+                    f8 = 0x80; // Force Amber output
+                }
+                else if (color == "Off")
+                {
+                    f5 = 0x00;
+                    f7 = 0x00;
+                    f8 = 0x00;
+                }
+
+                if (pattern == "Blink")
+                {
+                    f6 = 0x01; // 1Hz blink rate
+                }
+                else if (pattern == "Fade")
+                {
+                    f5 = 0x14; // Breathing pulse
+                    f6 = 0x02;
+                }
+
+                WritePort(0x2E, 0xF5); WritePort(0x2F, f5);
+                WritePort(0x2E, 0xF6); WritePort(0x2F, f6);
+                WritePort(0x2E, 0xF7); WritePort(0x2F, f7);
+                WritePort(0x2E, 0xF8); WritePort(0x2F, f8);
+
+                // Synchronize with LDN 0x07 (GPIO8 data register 0xE8)
+                WritePort(0x2E, 0x07); WritePort(0x2F, 0x07);
+                if (color == "Amber")
+                {
+                    WritePort(0x2E, 0xE8); WritePort(0x2F, 0x08);
+                }
+                else if (color == "Off")
+                {
+                    WritePort(0x2E, 0xE8); WritePort(0x2F, 0x00);
+                }
+                else
+                {
+                    WritePort(0x2E, 0xE8); WritePort(0x2F, 0x0F);
+                }
+
+                WritePort(0x2E, 0xAA);
+                LedColorMode = color;
+                LedPatternMode = pattern;
+            }
+            catch { }
+        }
+
         public void SetLedColor(string color)
         {
-            LedColorMode = color;
+            SetLedHardware(color, LedPatternMode);
         }
 
         public void SetLedPattern(string pattern)
         {
-            LedPatternMode = pattern;
+            SetLedHardware(LedColorMode, pattern);
         }
 
         public CpuHardwareSpecs GetCpuHardwareSpecs()
