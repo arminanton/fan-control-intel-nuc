@@ -61,6 +61,17 @@ namespace NucFanControlGUI
                 ListBootOrder.ItemsSource = bootEntries;
             }
 
+            // Populate Visual BIOS Decoded NVRAM Settings
+            var bs = _backend.GetBiosSettings();
+            if (TxtBiosFanMode != null) TxtBiosFanMode.Text = string.Format("BIOS Fan Mode: {0}", bs.FanMode);
+            if (TxtBiosMinTemp != null) TxtBiosMinTemp.Text = string.Format("BIOS Min Temp: {0}°C", bs.MinTemp);
+            if (TxtBiosMinDuty != null) TxtBiosMinDuty.Text = string.Format("BIOS Min Duty: {0}%", bs.MinDuty);
+            if (TxtBiosDutyInc != null) TxtBiosDutyInc.Text = string.Format("Duty Increment: {0}%/°C", bs.DutyIncrement);
+            if (TxtBiosAperture != null) TxtBiosAperture.Text = string.Format("IGD Aperture: {0}", bs.ApertureSize);
+            if (TxtBiosAudio != null) TxtBiosAudio.Text = string.Format("Audio Controller: {0}", bs.AudioEnabled ? "Enabled" : "Disabled");
+            if (TxtBiosHdmi != null) TxtBiosHdmi.Text = string.Format("HDMI/DP Audio: {0}", bs.HdmiAudio ? "Enabled" : "Disabled");
+            if (TxtBiosFixedDuty != null) TxtBiosFixedDuty.Text = string.Format("Fixed Duty: {0}%", bs.FixedDuty);
+
             _timer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
@@ -382,6 +393,25 @@ namespace NucFanControlGUI
             TxtStressLabel.Text = "⚡ RUN 15-SECOND HARDWARE STABILITY TEST";
 
             RefreshTelemetry();
+        }
+
+        
+        private void BtnBootWindows_Click(object sender, RoutedEventArgs e)
+        {
+            if (MessageBox.Show("Set Windows Boot Manager (Boot0000) as the next boot target and reboot?", "Reboot into Windows", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            {
+                _backend.SetBootNext(0x0000);
+                System.Diagnostics.Process.Start("shutdown", "/r /t 2");
+            }
+        }
+
+        private void BtnBootMac_Click(object sender, RoutedEventArgs e)
+        {
+            if (MessageBox.Show("Set Mac OS X OpenCore (Boot0002) as the next boot target and reboot?", "Reboot into macOS", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            {
+                _backend.SetBootNext(0x0002);
+                System.Diagnostics.Process.Start("shutdown", "/r /t 2");
+            }
         }
 
         protected override void OnClosed(EventArgs e)

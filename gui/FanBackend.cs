@@ -56,6 +56,18 @@ namespace NucFanControlGUI
         public double MinDuty { get; set; } = 40.0;
     }
 
+    public class BiosSettings
+    {
+        public string FanMode { get; set; } = "Quiet";
+        public int FixedDuty { get; set; } = 70;
+        public int MinTemp { get; set; } = 67;
+        public int MinDuty { get; set; } = 27;
+        public int DutyIncrement { get; set; } = 2;
+        public string ApertureSize { get; set; } = "256 MB";
+        public bool AudioEnabled { get; set; } = true;
+        public bool HdmiAudio { get; set; } = true;
+    }
+
     public class FanBackend : IDisposable
     {
         private const uint GENERIC_READ = 0x80000000;
@@ -95,6 +107,11 @@ namespace NucFanControlGUI
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern uint GetFirmwareEnvironmentVariableW(
             string lpName, string lpGuid, [Out] byte[] pBuffer, uint nSize);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool SetFirmwareEnvironmentVariableExW(
+            string lpName, string lpGuid, byte[] pBuffer, uint nSize, uint dwAttributes);
+
 
         [DllImport("advapi32.dll", SetLastError = true)]
         private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
@@ -627,6 +644,64 @@ uc-fan-control.exe"" max"" /SC ONLOGON /RL HIGHEST") { CreateNoWindow = true, Us
                 }
             }
             catch { }
+        }
+
+        
+        public BiosSettings GetBiosSettings()
+        {
+            var bs = new BiosSettings();
+            try
+            {
+                string setupGuid = "{EC87D643-EBA4-4BB5-A1E5-3F3E36B20DA9}";
+                byte[] buf = new byte[8192];
+                uint read = GetFirmwareEnvironmentVariableW("Setup", setupGuid, buf, (uint)buf.Length);
+                if (read > 0xEA6)
+                {
+                    byte mode = buf[0xE9D];
+                    bs.FanMode = mode switch
+                    {
+                        0 => "Fixed",
+                        1 => "Custom",
+                        2 => "Cool",
+                        3 => "Balanced",
+                        4 => "Quiet",
+                        _ => string.Format("Mode {0}", mode)
+                    };
+                    bs.FixedDuty = buf[0xEA6];
+                    bs.MinTemp = buf[0xEA0];
+                    bs.MinDuty = buf[0xEA1];
+                    bs.DutyIncrement = buf[0xEA2];
+
+                    byte ap = buf[0x3B4];
+                    bs.ApertureSize = ap switch
+                    {
+                        0 => "128 MB",
+                        1 => "256 MB",
+                        2 => "512 MB",
+                        3 => "1024 MB (1 GB)",
+                        _ => string.Format("{0} MB", ap)
+                    };
+
+                    bs.AudioEnabled = buf[0x9C1] != 0;
+                    bs.HdmiAudio = buf[0xEEA] != 0;
+                }
+            }
+            catch { }
+            return bs;
+        }
+
+        public bool SetBootNext(ushort bootNum)
+        {
+            try
+            {
+                string uefiGlobal = "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}";
+                byte[] val = BitConverter.GetBytes(bootNum);
+                return SetFirmwareEnvironmentVariableExW("BootNext", uefiGlobal, val, 2, 7);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public void Dispose()

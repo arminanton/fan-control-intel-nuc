@@ -447,15 +447,52 @@
 
                         <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
                             <StackPanel>
-                                <TextBlock Text="PHYSICAL UEFI BOOT ORDER (IN-WINDOWS BIOS)" FontSize="11" FontWeight="Bold" Foreground="#10B981" Margin="0,0,0,6"/>
-                                <ItemsControl x:Name="ListBootOrder" Margin="0,2,0,4">
+                                <TextBlock Text="PHYSICAL UEFI BOOT CONFIGURATION &amp; ONE-TIME BOOT (BootNext)" FontSize="11" FontWeight="Bold" Foreground="#10B981" Margin="0,0,0,6"/>
+                                <ItemsControl x:Name="ListBootOrder" Margin="0,2,0,6">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="{Binding}" FontSize="11" Foreground="#E2E8F0" Margin="0,2,0,2"/>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <TextBlock Text="Setup NVRAM: Present (4093 Bytes in {EC87D643-EBA4-4BB5-A1E5-3F3E36B20DA9})" FontSize="9" Foreground="#64748B" Margin="0,4,0,0"/>
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="BtnBootWindows" Grid.Column="0" Height="28" Background="#0284C7" Click="BtnBootWindows_Click">
+                                        <TextBlock Text="🔄 Reboot into Windows" FontSize="10" FontWeight="SemiBold"/>
+                                    </Button>
+                                    <Button x:Name="BtnBootMac" Grid.Column="2" Height="28" Background="#7C3AED" Click="BtnBootMac_Click">
+                                        <TextBlock Text="🍎 Reboot into macOS" FontSize="10" FontWeight="SemiBold"/>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="VISUAL BIOS SETUP NVRAM CONFIGURATION (DECODED)" FontSize="11" FontWeight="Bold" Foreground="#F59E0B" Margin="0,0,0,6"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock x:Name="TxtBiosFanMode" Text="BIOS Fan Mode: Quiet" FontSize="10" Foreground="#E2E8F0"/>
+                                        <TextBlock x:Name="TxtBiosMinTemp" Text="BIOS Min Temp: 67°C" FontSize="10" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                                        <TextBlock x:Name="TxtBiosMinDuty" Text="BIOS Min Duty: 27%" FontSize="10" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                                        <TextBlock x:Name="TxtBiosDutyInc" Text="Duty Increment: 2%/°C" FontSize="10" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock x:Name="TxtBiosAperture" Text="IGD Aperture: 256 MB" FontSize="10" Foreground="#E2E8F0"/>
+                                        <TextBlock x:Name="TxtBiosAudio" Text="Audio Controller: Enabled" FontSize="10" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                                        <TextBlock x:Name="TxtBiosHdmi" Text="HDMI/DP Audio: Enabled" FontSize="10" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                                        <TextBlock x:Name="TxtBiosFixedDuty" Text="Fixed Duty: 70%" FontSize="10" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="NVRAM Status: 4093 Bytes in {EC87D643...} | Attribute: 0x07 (NonVolatile/Runtime)" FontSize="9" Foreground="#64748B" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
 
