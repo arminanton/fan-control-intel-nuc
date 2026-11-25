@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -11,6 +13,7 @@ namespace NucFanControlGUI
         private readonly FanBackend _backend;
         private readonly DispatcherTimer _timer;
         private bool _isUpdatingUi = true;
+        private bool _isStressTesting = false;
 
         private double _currentPl1 = 50.0;
         private double _currentPl2 = 60.0;
@@ -34,7 +37,6 @@ namespace NucFanControlGUI
             if (TxtPl1Val != null) TxtPl1Val.Text = string.Format("{0:F0}W", _currentPl1);
             if (TxtPl2Val != null) TxtPl2Val.Text = string.Format("{0:F0}W", _currentPl2);
 
-            // Set up 1-second polling timer
             _timer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
@@ -44,7 +46,6 @@ namespace NucFanControlGUI
 
             _isUpdatingUi = false;
 
-            // Initial refresh
             RefreshTelemetry();
         }
 
@@ -57,60 +58,67 @@ namespace NucFanControlGUI
         {
             if (!_backend.IsInitialized)
             {
-                if (TxtCpuTemp != null)
+                if (TxtCputin != null)
                 {
-                    TxtCpuTemp.Text = "ERR";
-                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68));
+                    TxtCputin.Text = "ERR";
+                    TxtCputin.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68));
                 }
                 return;
             }
 
-            var temps = _backend.GetTemperatures();
+            var temps = _backend.GetThermalZones();
             var fan = _backend.GetFanStatus();
             var cpu = _backend.GetCpuTelemetry();
+            var rails = _backend.GetVoltageRails();
 
-            // Update Temperature Card
-            if (TxtCpuTemp != null)
-            {
-                TxtCpuTemp.Text = string.Format("{0:F1}°C", temps.cpuTemp);
-                if (temps.cpuTemp > 80)
-                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Crimson
-                else if (temps.cpuTemp > 65)
-                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
-                else
-                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Emerald
-            }
+            // Update Fan Tachometer
+            if (TxtFanRpm != null) TxtFanRpm.Text = string.Format("{0} RPM", fan.rpm);
+            if (TxtDuty != null) TxtDuty.Text = string.Format("{0}%", fan.percent);
+            if (TxtMode != null) TxtMode.Text = fan.mode == 0x40 ? "Mode: BIOS SmartFan IV" : string.Format("Mode: Manual (PWM {0})", fan.pwm);
 
+            // Update Thermal Zones
             if (TxtCoreTemp != null)
             {
-                TxtCoreTemp.Text = string.Format("Core: {0:F0}°C", cpu.coreTemp);
+                TxtCoreTemp.Text = string.Format("{0:F1}°C", temps.Core0);
+                TxtCoreTemp.Foreground = GetTempBrush(temps.Core0);
+            }
+            if (TxtCputin != null)
+            {
+                TxtCputin.Text = string.Format("{0:F1}°C", temps.Cputin);
+                TxtCputin.Foreground = GetTempBrush(temps.Cputin);
+            }
+            if (TxtSystin != null) TxtSystin.Text = string.Format("{0:F1}°C", temps.Systin);
+            if (TxtAuxtin != null) TxtAuxtin.Text = string.Format("{0:F1}°C", temps.Auxtin);
+
+            // Update Voltage Rails
+            if (TxtVcore != null) TxtVcore.Text = string.Format("VCORE: {0:F3} V", rails.Vcore);
+            if (TxtVmem != null) TxtVmem.Text = string.Format("MEM VCC: {0:F3} V", rails.Vmem);
+            if (TxtAvcc != null) TxtAvcc.Text = string.Format("AVCC: {0:F3} V", rails.Avcc);
+            if (Txt3vcc != null) Txt3vcc.Text = string.Format("3VCC: {0:F3} V", rails.ThreeVcc);
+            if (TxtVin4 != null) TxtVin4.Text = string.Format("PCH CORE: {0:F3} V", rails.Vin4);
+            if (TxtVin6 != null) TxtVin6.Text = string.Format("STANDBY: {0:F3} V", rails.Vin6);
+
+            // Update CPU Power & Clocks
+            if (TxtWatts != null) TxtWatts.Text = string.Format("{0:F1} W", cpu.watts);
+            if (TxtPlSummary != null) TxtPlSummary.Text = string.Format("PL1: {0:F0}W | PL2: {1:F0}W", cpu.pl1, cpu.pl2);
+            if (TxtClock != null) TxtClock.Text = string.Format("{0:F0} MHz", cpu.mhz);
+
+            // Update Safety Watchdog Status
+            if (TxtWatchdogStatus != null)
+            {
+                if (_backend.WatchdogTripped)
+                {
+                    TxtWatchdogStatus.Text = "THERMAL FALLBACK TRIGGERED";
+                    TxtWatchdogStatus.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68));
+                }
+                else
+                {
+                    TxtWatchdogStatus.Text = "GUARD ACTIVE";
+                    TxtWatchdogStatus.Foreground = new SolidColorBrush(Color.FromRgb(16, 185, 129));
+                }
             }
 
-            // Update Fan Speed Card
-            if (TxtFanRpm != null) TxtFanRpm.Text = string.Format("{0} RPM", fan.rpm);
-            if (TxtDuty != null) TxtDuty.Text = string.Format("Duty: {0}%", fan.percent);
-
-            // Update Package Power Card (Watts)
-            if (TxtWatts != null)
-            {
-                TxtWatts.Text = string.Format("{0:F1} W", cpu.watts);
-            }
-            if (TxtPlLimits != null)
-            {
-                TxtPlLimits.Text = string.Format("PL1: {0:F0}W | PL2: {1:F0}W", cpu.pl1, cpu.pl2);
-            }
-
-            // Update CPU Clock Card
-            if (TxtClock != null)
-            {
-                TxtClock.Text = string.Format("{0:F0} MHz", cpu.mhz);
-            }
-            if (TxtMode != null)
-            {
-                TxtMode.Text = fan.mode == 0x40 ? "BIOS Auto" : string.Format("PWM {0}", fan.pwm);
-            }
-
-            // Update Fan Slider without feedback loop
+            // Sync Slider if in manual mode
             if (!_isUpdatingUi && SliderPwm != null && TxtSliderVal != null)
             {
                 _isUpdatingUi = true;
@@ -121,12 +129,13 @@ namespace NucFanControlGUI
                 }
                 _isUpdatingUi = false;
             }
+        }
 
-            // Board Sensors Footer
-            if (TxtBoardTemps != null)
-            {
-                TxtBoardTemps.Text = string.Format("Board: SYSTIN {0:F1}°C | AUXTIN {1:F1}°C | eDRAM: 128MB L4 Active", temps.sysTemp, temps.auxTemp);
-            }
+        private SolidColorBrush GetTempBrush(float temp)
+        {
+            if (temp > 80) return new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+            if (temp > 65) return new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
+            return new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Emerald
         }
 
         private void BtnMax_Click(object sender, RoutedEventArgs e)
@@ -228,6 +237,50 @@ namespace NucFanControlGUI
             if (_isUpdatingUi) return;
             bool enable = ChkBootMax.IsChecked == true;
             FanBackend.SetBootMax(enable);
+        }
+
+        private async void BtnStressTest_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isStressTesting) return;
+            _isStressTesting = true;
+
+            BtnStressTest.IsEnabled = false;
+            ProgStress.Visibility = Visibility.Visible;
+            ProgStress.Value = 0;
+            TxtStressLabel.Text = "TESTING HARDWARE STABILITY...";
+
+            var cts = new CancellationTokenSource();
+            var token = cts.Token;
+
+            // Spawn CPU load across all 8 threads
+            for (int i = 0; i < Environment.ProcessorCount; i++)
+            {
+                Task.Run(() =>
+                {
+                    double x = 1.0001;
+                    while (!token.IsCancellationRequested)
+                    {
+                        x = Math.Sin(x) * Math.Cos(x) + Math.Sqrt(x);
+                    }
+                }, token);
+            }
+
+            for (int s = 1; s <= 15; s++)
+            {
+                await Task.Delay(1000);
+                ProgStress.Value = (s * 100.0) / 15.0;
+                TxtStressLabel.Text = string.Format("STABILITY TEST: {0}/15s", s);
+            }
+
+            cts.Cancel();
+            await Task.Delay(500);
+
+            _isStressTesting = false;
+            BtnStressTest.IsEnabled = true;
+            ProgStress.Visibility = Visibility.Collapsed;
+            TxtStressLabel.Text = "⚡ RUN 15-SECOND HARDWARE STABILITY TEST";
+
+            RefreshTelemetry();
         }
 
         protected override void OnClosed(EventArgs e)

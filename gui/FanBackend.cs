@@ -2,11 +2,31 @@ using System;
 using System.IO;
 using System.Text;
 using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 namespace NucFanControlGUI
 {
+    public class VoltageRails
+    {
+        public double Vcore { get; set; }
+        public double Vmem { get; set; }
+        public double Avcc { get; set; }
+        public double ThreeVcc { get; set; }
+        public double Vin4 { get; set; }
+        public double Vin6 { get; set; }
+    }
+
+    public class ThermalZones
+    {
+        public float Core0 { get; set; }
+        public float Cputin { get; set; }
+        public float Systin { get; set; }
+        public float Auxtin { get; set; }
+    }
+
     public class FanBackend : IDisposable
     {
         private const uint GENERIC_READ = 0x80000000;
@@ -53,6 +73,9 @@ namespace NucFanControlGUI
         private double _energyUnit = 0.00006103515625;
         private ulong _lastEnergy = 0;
         private DateTime _lastEnergyTime = DateTime.UtcNow;
+
+        private bool _watchdogTripped = false;
+        public bool WatchdogTripped => _watchdogTripped;
 
         public bool IsInitialized => _isLpcInitialized;
         public bool IsMsrAvailable => _isMsrInitialized;
@@ -139,12 +162,10 @@ namespace NucFanControlGUI
                 if (!DeviceIoControl(_hMsr, CTL_LOAD, bin, (uint)bin.Length, null, 0, out returned, IntPtr.Zero))
                     return;
 
-                // Query MSR 0x606 for energy units
                 ulong units = ReadMsr(0x606);
                 int energyPow = (int)((units >> 8) & 0x1F);
                 _energyUnit = energyPow > 0 ? 1.0 / (1 << energyPow) : 0.00006103515625;
 
-                // Query MSR 0x1A2 for TjMax
                 ulong tjMsr = ReadMsr(0x1A2);
                 uint val = (uint)((tjMsr >> 16) & 0xFF);
                 if (val >= 70 && val <= 115) _tjMax = val;
@@ -248,12 +269,52 @@ namespace NucFanControlGUI
             WritePort(data, val);
         }
 
-        public (float cpuTemp, float sysTemp, float auxTemp) GetTemperatures()
+        public VoltageRails GetVoltageRails()
         {
-            float cpu = ReadHwm(0, 0x73) + ((ReadHwm(0, 0x74) & 0x80) != 0 ? 0.5f : 0f);
-            float aux = ReadHwm(0, 0x75) + ((ReadHwm(0, 0x76) & 0x80) != 0 ? 0.5f : 0f);
-            float sys = ReadHwm(0, 0x77) + ((ReadHwm(0, 0x78) & 0x80) != 0 ? 0.5f : 0f);
-            return (cpu, sys, aux);
+            return new VoltageRails
+            {
+                Vcore = ReadHwm(0, 0x20) * 0.008,
+                Vmem = ReadHwm(0, 0x21) * 0.008,
+                Avcc = ReadHwm(0, 0x22) * 0.008 * 2.0,
+                ThreeVcc = ReadHwm(0, 0x23) * 0.008 * 2.0,
+                Vin4 = ReadHwm(0, 0x24) * 0.008,
+                Vin6 = ReadHwm(0, 0x26) * 0.008
+            };
+        }
+
+        public ThermalZones GetThermalZones()
+        {
+            float cputin = ReadHwm(0, 0x73) + ((ReadHwm(0, 0x74) & 0x80) != 0 ? 0.5f : 0f);
+            float auxtin = ReadHwm(0, 0x75) + ((ReadHwm(0, 0x76) & 0x80) != 0 ? 0.5f : 0f);
+            float systin = ReadHwm(0, 0x77) + ((ReadHwm(0, 0x78) & 0x80) != 0 ? 0.5f : 0f);
+
+            float core0 = 0;
+            if (_isMsrInitialized)
+            {
+                ulong therm = ReadMsr(0x19C);
+                uint digital = (uint)((therm >> 16) & 0x7F);
+                core0 = (float)(_tjMax - digital);
+
+                // Thermal Watchdog Check: if core > 85C, trip safety
+                if (core0 >= 85.0f && !_watchdogTripped)
+                {
+                    _watchdogTripped = true;
+                    SetFanManual(255); // Force maximum fan immediately
+                    SetPowerLimits(45.0, 56.0); // Drop power to stock 45W
+                }
+                else if (core0 < 75.0f && _watchdogTripped)
+                {
+                    _watchdogTripped = false;
+                }
+            }
+
+            return new ThermalZones
+            {
+                Core0 = core0,
+                Cputin = cputin,
+                Systin = systin,
+                Auxtin = auxtin
+            };
         }
 
         public (int rpm, byte pwm, int percent, byte mode) GetFanStatus()
@@ -270,20 +331,19 @@ namespace NucFanControlGUI
 
         public void SetFanManual(byte pwm)
         {
-            WriteHwm(1, 0x02, 0x00); // Manual Mode
+            WriteHwm(1, 0x02, 0x00);
             WriteHwm(1, 0x09, pwm);
         }
 
         public void SetFanAuto()
         {
-            WriteHwm(1, 0x02, 0x40); // BIOS SmartFan IV
+            WriteHwm(1, 0x02, 0x40);
         }
 
-        public (double watts, double mhz, float coreTemp, double pl1, double pl2) GetCpuTelemetry()
+        public (double watts, double mhz, double pl1, double pl2) GetCpuTelemetry()
         {
-            if (!_isMsrInitialized) return (0, 0, 0, 45, 56);
+            if (!_isMsrInitialized) return (0, 0, 45, 56);
 
-            // Real-Time Power Calculation via MSR 0x611
             ulong curEnergy = ReadMsr(0x611);
             DateTime now = DateTime.UtcNow;
             double elapsed = (now - _lastEnergyTime).TotalSeconds;
@@ -296,22 +356,15 @@ namespace NucFanControlGUI
                 _lastEnergyTime = now;
             }
 
-            // CPU Ratio / Frequency via MSR 0x198
             ulong perf = ReadMsr(0x198);
             uint ratio = (uint)((perf >> 8) & 0xFF);
             double mhz = ratio * 100.0;
 
-            // Core0 Temperature via MSR 0x19C
-            ulong therm = ReadMsr(0x19C);
-            uint digital = (uint)((therm >> 16) & 0x7F);
-            float coreTemp = (float)(_tjMax - digital);
-
-            // Power Limits via MSR 0x610
             ulong pwr = ReadMsr(0x610);
             double pl1 = (pwr & 0x7FFF) / 8.0;
             double pl2 = ((pwr >> 32) & 0x7FFF) / 8.0;
 
-            return (watts, mhz, coreTemp, pl1, pl2);
+            return (watts, mhz, pl1, pl2);
         }
 
         public void SetPowerLimits(double pl1Watts, double pl2Watts)
@@ -322,7 +375,6 @@ namespace NucFanControlGUI
             ulong pl1Raw = (ulong)Math.Round(pl1Watts * 8.0) & 0x7FFFUL;
             ulong pl2Raw = (ulong)Math.Round(pl2Watts * 8.0) & 0x7FFFUL;
 
-            // Retain control bits (enable, clamp, time window) and update power values
             ulong updated = (cur & ~0x7FFFUL) | pl1Raw;
             updated = (updated & ~(0x7FFFUL << 32)) | (pl2Raw << 32);
 
