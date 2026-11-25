@@ -1,7 +1,7 @@
 <Window x:Class="NucFanControlGUI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Intel NUC Skull Canyon Hyper-Control Suite" Height="700" Width="560"
+        Title="Intel NUC Skull Canyon Hyper-Control Suite" Height="730" Width="580"
         WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize"
         Background="#090D16" Foreground="#E2E8F0" FontFamily="Segoe UI">
     <Window.Resources>
@@ -140,6 +140,38 @@
 
                         <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
                             <StackPanel>
+                                <Grid Margin="0,0,0,6">
+                                    <TextBlock Text="AUTONOMOUS DYNAMIC FAN CURVE ENGINE" FontSize="11" FontWeight="Bold" Foreground="#38BDF8"/>
+                                    <CheckBox x:Name="ChkFanCurve" Content="Enable Autonomous Curve" FontSize="10" Foreground="#38BDF8" HorizontalAlignment="Right" Checked="ChkFanCurve_Changed" Unchecked="ChkFanCurve_Changed"/>
+                                </Grid>
+                                <Grid Margin="0,2,0,0">
+                                    <TextBlock Text="Off / Minimum Speed Temperature" FontSize="10" Foreground="#94A3B8"/>
+                                    <TextBlock x:Name="TxtCurveOffVal" Text="40°C" FontSize="10" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Right"/>
+                                </Grid>
+                                <Slider x:Name="SliderCurveOff" Minimum="30" Maximum="50" Value="40" Margin="0,2,0,4" ValueChanged="SliderCurve_ValueChanged"/>
+
+                                <Grid Margin="0,2,0,0">
+                                    <TextBlock Text="Ramp Up Transition Temperature" FontSize="10" Foreground="#94A3B8"/>
+                                    <TextBlock x:Name="TxtCurveRampVal" Text="55°C" FontSize="10" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Right"/>
+                                </Grid>
+                                <Slider x:Name="SliderCurveRamp" Minimum="45" Maximum="70" Value="55" Margin="0,2,0,4" ValueChanged="SliderCurve_ValueChanged"/>
+
+                                <Grid Margin="0,2,0,0">
+                                    <TextBlock Text="100% Full Tilt Temperature Threshold" FontSize="10" Foreground="#94A3B8"/>
+                                    <TextBlock x:Name="TxtCurveFullVal" Text="75°C" FontSize="10" FontWeight="Bold" Foreground="#EF4444" HorizontalAlignment="Right"/>
+                                </Grid>
+                                <Slider x:Name="SliderCurveFull" Minimum="65" Maximum="85" Value="75" Margin="0,2,0,4" ValueChanged="SliderCurve_ValueChanged"/>
+
+                                <Grid Margin="0,2,0,0">
+                                    <TextBlock Text="Baseline Minimum Duty Cycle" FontSize="10" Foreground="#94A3B8"/>
+                                    <TextBlock x:Name="TxtCurveMinDutyVal" Text="40%" FontSize="10" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Right"/>
+                                </Grid>
+                                <Slider x:Name="SliderCurveMinDuty" Minimum="25" Maximum="60" Value="40" Margin="0,2,0,0" ValueChanged="SliderCurve_ValueChanged"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
+                            <StackPanel>
                                 <TextBlock Text="QUAD-ZONE THERMAL SENSORS" FontSize="11" FontWeight="Bold" Foreground="#10B981" Margin="0,0,0,8"/>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -253,6 +285,50 @@
                                     <TextBlock x:Name="TxtPl2Val" Text="60W" FontSize="11" FontWeight="Bold" Foreground="#F59E0B" HorizontalAlignment="Right"/>
                                 </Grid>
                                 <Slider x:Name="SliderPl2" Minimum="35" Maximum="75" Value="60" SmallChange="1" LargeChange="5" Margin="0,4,0,0" ValueChanged="SliderPl2_ValueChanged"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="CORE MULTIPLIER &amp; UNCORE FREQUENCY MATRIX (MSR 0x1AD / 0x620)" FontSize="11" FontWeight="Bold" Foreground="#38BDF8" Margin="0,0,0,8"/>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#1E293B" CornerRadius="4" Padding="6" Margin="2">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <TextBlock Text="1-CORE" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center"/>
+                                            <TextBlock x:Name="TxtRatio1C" Text="35x" FontSize="14" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="3500 MHz" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Background="#1E293B" CornerRadius="4" Padding="6" Margin="2">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <TextBlock Text="2-CORES" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center"/>
+                                            <TextBlock x:Name="TxtRatio2C" Text="34x" FontSize="14" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="3400 MHz" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2" Background="#1E293B" CornerRadius="4" Padding="6" Margin="2">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <TextBlock Text="3-CORES" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center"/>
+                                            <TextBlock x:Name="TxtRatio3C" Text="33x" FontSize="14" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="3300 MHz" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="3" Background="#1E293B" CornerRadius="4" Padding="6" Margin="2">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <TextBlock Text="4-CORES" FontSize="9" Foreground="#94A3B8" HorizontalAlignment="Center"/>
+                                            <TextBlock x:Name="TxtRatio4C" Text="32x" FontSize="14" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="3200 MHz" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                                <TextBlock x:Name="TxtUncoreSpecs" Text="Ring / Uncore Frequency: 800 MHz to 3500 MHz | TjMax: 100°C" FontSize="10" Foreground="#94A3B8" Margin="2,4,0,0"/>
+                                <TextBlock x:Name="TxtLockSpecs" Text="Silicon Status: CFG Lock UNLOCKED | MSR 0xCE OC Flag ACTIVE" FontSize="10" Foreground="#10B981" Margin="2,2,0,0"/>
                             </StackPanel>
                         </Border>
 

@@ -27,6 +27,28 @@ namespace NucFanControlGUI
         public float Auxtin { get; set; }
     }
 
+    public class CpuHardwareSpecs
+    {
+        public uint Ratio1C { get; set; } = 35;
+        public uint Ratio2C { get; set; } = 34;
+        public uint Ratio3C { get; set; } = 33;
+        public uint Ratio4C { get; set; } = 32;
+        public uint UncoreMin { get; set; } = 8;
+        public uint UncoreMax { get; set; } = 35;
+        public uint TjMax { get; set; } = 100;
+        public bool CfgLock { get; set; } = false;
+        public bool OcCapable { get; set; } = true;
+    }
+
+    public class FanCurveSettings
+    {
+        public bool IsEnabled { get; set; } = false;
+        public double OffTemp { get; set; } = 40.0;
+        public double RampTemp { get; set; } = 55.0;
+        public double FullTemp { get; set; } = 75.0;
+        public double MinDuty { get; set; } = 40.0;
+    }
+
     public class FanBackend : IDisposable
     {
         private const uint GENERIC_READ = 0x80000000;
@@ -76,6 +98,9 @@ namespace NucFanControlGUI
 
         private bool _watchdogTripped = false;
         public bool WatchdogTripped => _watchdogTripped;
+
+        public FanCurveSettings CurveConfig { get; } = new FanCurveSettings();
+        private byte _lastCurvePwm = 0;
 
         public bool IsInitialized => _isLpcInitialized;
         public bool IsMsrAvailable => _isMsrInitialized;
@@ -299,13 +324,19 @@ namespace NucFanControlGUI
                 if (core0 >= 85.0f && !_watchdogTripped)
                 {
                     _watchdogTripped = true;
-                    SetFanManual(255); // Force maximum fan immediately
-                    SetPowerLimits(45.0, 56.0); // Drop power to stock 45W
+                    SetFanManual(255);
+                    SetPowerLimits(45.0, 56.0);
                 }
                 else if (core0 < 75.0f && _watchdogTripped)
                 {
                     _watchdogTripped = false;
                 }
+            }
+
+            // Process Autonomous Dynamic Fan Curve if enabled and watchdog not tripped
+            if (CurveConfig.IsEnabled && !_watchdogTripped)
+            {
+                ProcessDynamicCurve(cputin > core0 ? cputin : core0);
             }
 
             return new ThermalZones
@@ -315,6 +346,31 @@ namespace NucFanControlGUI
                 Systin = systin,
                 Auxtin = auxtin
             };
+        }
+
+        private void ProcessDynamicCurve(float temp)
+        {
+            double targetPct;
+            if (temp <= CurveConfig.OffTemp)
+            {
+                targetPct = CurveConfig.MinDuty;
+            }
+            else if (temp >= CurveConfig.FullTemp)
+            {
+                targetPct = 100.0;
+            }
+            else
+            {
+                double ratio = (temp - CurveConfig.OffTemp) / (CurveConfig.FullTemp - CurveConfig.OffTemp);
+                targetPct = CurveConfig.MinDuty + ratio * (100.0 - CurveConfig.MinDuty);
+            }
+
+            byte targetPwm = (byte)Math.Round((targetPct * 255.0) / 100.0);
+            if (Math.Abs((int)targetPwm - (int)_lastCurvePwm) >= 3)
+            {
+                SetFanManual(targetPwm);
+                _lastCurvePwm = targetPwm;
+            }
         }
 
         public (int rpm, byte pwm, int percent, byte mode) GetFanStatus()
@@ -365,6 +421,42 @@ namespace NucFanControlGUI
             double pl2 = ((pwr >> 32) & 0x7FFF) / 8.0;
 
             return (watts, mhz, pl1, pl2);
+        }
+
+        public CpuHardwareSpecs GetCpuHardwareSpecs()
+        {
+            var specs = new CpuHardwareSpecs();
+            if (!_isMsrInitialized) return specs;
+
+            ulong turbo = ReadMsr(0x1AD);
+            if (turbo > 0)
+            {
+                specs.Ratio1C = (uint)(turbo & 0xFF);
+                specs.Ratio2C = (uint)((turbo >> 8) & 0xFF);
+                specs.Ratio3C = (uint)((turbo >> 16) & 0xFF);
+                specs.Ratio4C = (uint)((turbo >> 24) & 0xFF);
+            }
+
+            ulong uncore = ReadMsr(0x620);
+            if (uncore > 0)
+            {
+                specs.UncoreMax = (uint)(uncore & 0xFF);
+                specs.UncoreMin = (uint)((uncore >> 8) & 0xFF);
+            }
+
+            ulong tempTarget = ReadMsr(0x1A2);
+            if (tempTarget > 0)
+            {
+                specs.TjMax = (uint)((tempTarget >> 16) & 0xFF);
+            }
+
+            ulong msrE2 = ReadMsr(0xE2);
+            specs.CfgLock = (msrE2 & 0x8000) != 0;
+
+            ulong msrCE = ReadMsr(0xCE);
+            specs.OcCapable = (msrCE & (1UL << 28)) != 0;
+
+            return specs;
         }
 
         public void SetPowerLimits(double pl1Watts, double pl2Watts)

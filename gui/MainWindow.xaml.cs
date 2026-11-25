@@ -37,6 +37,23 @@ namespace NucFanControlGUI
             if (TxtPl1Val != null) TxtPl1Val.Text = string.Format("{0:F0}W", _currentPl1);
             if (TxtPl2Val != null) TxtPl2Val.Text = string.Format("{0:F0}W", _currentPl2);
 
+            // Populate CPU Hardware specs
+            var specs = _backend.GetCpuHardwareSpecs();
+            if (TxtRatio1C != null) TxtRatio1C.Text = string.Format("{0}x", specs.Ratio1C);
+            if (TxtRatio2C != null) TxtRatio2C.Text = string.Format("{0}x", specs.Ratio2C);
+            if (TxtRatio3C != null) TxtRatio3C.Text = string.Format("{0}x", specs.Ratio3C);
+            if (TxtRatio4C != null) TxtRatio4C.Text = string.Format("{0}x", specs.Ratio4C);
+            if (TxtUncoreSpecs != null)
+                TxtUncoreSpecs.Text = string.Format("Ring / Uncore Frequency: {0}00 MHz to {1}00 MHz | TjMax: {2}°C", specs.UncoreMin, specs.UncoreMax, specs.TjMax);
+            if (TxtLockSpecs != null)
+                TxtLockSpecs.Text = string.Format("Silicon Status: CFG Lock {0} | MSR 0xCE OC Flag {1}", specs.CfgLock ? "LOCKED" : "UNLOCKED", specs.OcCapable ? "ACTIVE" : "INACTIVE");
+
+            // Populate initial curve settings
+            if (SliderCurveOff != null) SliderCurveOff.Value = _backend.CurveConfig.OffTemp;
+            if (SliderCurveRamp != null) SliderCurveRamp.Value = _backend.CurveConfig.RampTemp;
+            if (SliderCurveFull != null) SliderCurveFull.Value = _backend.CurveConfig.FullTemp;
+            if (SliderCurveMinDuty != null) SliderCurveMinDuty.Value = _backend.CurveConfig.MinDuty;
+
             _timer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
@@ -74,7 +91,13 @@ namespace NucFanControlGUI
             // Update Fan Tachometer
             if (TxtFanRpm != null) TxtFanRpm.Text = string.Format("{0} RPM", fan.rpm);
             if (TxtDuty != null) TxtDuty.Text = string.Format("{0}%", fan.percent);
-            if (TxtMode != null) TxtMode.Text = fan.mode == 0x40 ? "Mode: BIOS SmartFan IV" : string.Format("Mode: Manual (PWM {0})", fan.pwm);
+            if (TxtMode != null)
+            {
+                if (_backend.CurveConfig.IsEnabled)
+                    TxtMode.Text = string.Format("Mode: Autonomous Curve (PWM {0})", fan.pwm);
+                else
+                    TxtMode.Text = fan.mode == 0x40 ? "Mode: BIOS SmartFan IV" : string.Format("Mode: Manual (PWM {0})", fan.pwm);
+            }
 
             // Update Thermal Zones
             if (TxtCoreTemp != null)
@@ -118,8 +141,8 @@ namespace NucFanControlGUI
                 }
             }
 
-            // Sync Slider if in manual mode
-            if (!_isUpdatingUi && SliderPwm != null && TxtSliderVal != null)
+            // Sync Slider if in manual mode and curve is off
+            if (!_isUpdatingUi && !_backend.CurveConfig.IsEnabled && SliderPwm != null && TxtSliderVal != null)
             {
                 _isUpdatingUi = true;
                 if (fan.mode != 0x40)
@@ -133,13 +156,16 @@ namespace NucFanControlGUI
 
         private SolidColorBrush GetTempBrush(float temp)
         {
-            if (temp > 80) return new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
-            if (temp > 65) return new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
-            return new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Emerald
+            if (temp > 80) return new SolidColorBrush(Color.FromRgb(239, 68, 68));
+            if (temp > 65) return new SolidColorBrush(Color.FromRgb(245, 158, 11));
+            return new SolidColorBrush(Color.FromRgb(16, 185, 129));
         }
 
         private void BtnMax_Click(object sender, RoutedEventArgs e)
         {
+            if (ChkFanCurve != null) ChkFanCurve.IsChecked = false;
+            _backend.CurveConfig.IsEnabled = false;
+
             _backend.SetFanManual(255);
             _isUpdatingUi = true;
             if (SliderPwm != null) SliderPwm.Value = 100;
@@ -150,12 +176,18 @@ namespace NucFanControlGUI
 
         private void BtnAuto_Click(object sender, RoutedEventArgs e)
         {
+            if (ChkFanCurve != null) ChkFanCurve.IsChecked = false;
+            _backend.CurveConfig.IsEnabled = false;
+
             _backend.SetFanAuto();
             RefreshTelemetry();
         }
 
         private void FanPreset_Click(object sender, RoutedEventArgs e)
         {
+            if (ChkFanCurve != null) ChkFanCurve.IsChecked = false;
+            _backend.CurveConfig.IsEnabled = false;
+
             if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int pct))
             {
                 byte pwm = (byte)Math.Round((pct * 255.0) / 100.0);
@@ -172,11 +204,50 @@ namespace NucFanControlGUI
         {
             if (_isUpdatingUi || TxtSliderVal == null) return;
 
+            if (ChkFanCurve != null && ChkFanCurve.IsChecked == true)
+            {
+                ChkFanCurve.IsChecked = false;
+                _backend.CurveConfig.IsEnabled = false;
+            }
+
             int pct = (int)Math.Round(e.NewValue);
             TxtSliderVal.Text = string.Format("{0}%", pct);
 
             byte pwm = (byte)Math.Round((pct * 255.0) / 100.0);
             _backend.SetFanManual(pwm);
+        }
+
+        private void ChkFanCurve_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isUpdatingUi) return;
+            _backend.CurveConfig.IsEnabled = ChkFanCurve.IsChecked == true;
+            RefreshTelemetry();
+        }
+
+        private void SliderCurve_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isUpdatingUi) return;
+
+            if (SliderCurveOff != null && TxtCurveOffVal != null)
+            {
+                _backend.CurveConfig.OffTemp = Math.Round(SliderCurveOff.Value);
+                TxtCurveOffVal.Text = string.Format("{0:F0}°C", _backend.CurveConfig.OffTemp);
+            }
+            if (SliderCurveRamp != null && TxtCurveRampVal != null)
+            {
+                _backend.CurveConfig.RampTemp = Math.Round(SliderCurveRamp.Value);
+                TxtCurveRampVal.Text = string.Format("{0:F0}°C", _backend.CurveConfig.RampTemp);
+            }
+            if (SliderCurveFull != null && TxtCurveFullVal != null)
+            {
+                _backend.CurveConfig.FullTemp = Math.Round(SliderCurveFull.Value);
+                TxtCurveFullVal.Text = string.Format("{0:F0}°C", _backend.CurveConfig.FullTemp);
+            }
+            if (SliderCurveMinDuty != null && TxtCurveMinDutyVal != null)
+            {
+                _backend.CurveConfig.MinDuty = Math.Round(SliderCurveMinDuty.Value);
+                TxtCurveMinDutyVal.Text = string.Format("{0:F0}%", _backend.CurveConfig.MinDuty);
+            }
         }
 
         private void PowerPreset_Click(object sender, RoutedEventArgs e)
@@ -252,7 +323,6 @@ namespace NucFanControlGUI
             var cts = new CancellationTokenSource();
             var token = cts.Token;
 
-            // Spawn CPU load across all 8 threads
             for (int i = 0; i < Environment.ProcessorCount; i++)
             {
                 Task.Run(() =>
