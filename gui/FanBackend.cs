@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,6 +39,12 @@ namespace NucFanControlGUI
         public uint TjMax { get; set; } = 100;
         public bool CfgLock { get; set; } = false;
         public bool OcCapable { get; set; } = true;
+    }
+
+    public class GpuTelemetry
+    {
+        public double GpuWatts { get; set; }
+        public uint Policy { get; set; } = 13;
     }
 
     public class FanCurveSettings
@@ -85,6 +92,28 @@ namespace NucFanControlGUI
             out uint lpBytesReturned,
             IntPtr lpOverlapped);
 
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern uint GetFirmwareEnvironmentVariableW(
+            string lpName, string lpGuid, [Out] byte[] pBuffer, uint nSize);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern bool LookupPrivilegeValue(string? lpSystemName, string lpName, out long lpLuid);
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        private struct TOKEN_PRIVILEGES
+        {
+            public int PrivilegeCount;
+            public long Luid;
+            public int Attributes;
+        }
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool AdjustTokenPrivileges(
+            IntPtr TokenHandle, bool DisableAllPrivileges, ref TOKEN_PRIVILEGES NewState, int BufferLength, IntPtr PreviousState, IntPtr ReturnLength);
+
         private SafeFileHandle? _hLpc;
         private SafeFileHandle? _hMsr;
         private ushort _hwmBase = 0x0A00;
@@ -94,6 +123,7 @@ namespace NucFanControlGUI
         private uint _tjMax = 100;
         private double _energyUnit = 0.00006103515625;
         private ulong _lastEnergy = 0;
+        private ulong _lastGpuEnergy = 0;
         private DateTime _lastEnergyTime = DateTime.UtcNow;
 
         private bool _watchdogTripped = false;
@@ -109,6 +139,24 @@ namespace NucFanControlGUI
         {
             InitializeLpc();
             InitializeMsr();
+            EnablePrivilege("SeSystemEnvironmentPrivilege");
+        }
+
+        private static void EnablePrivilege(string priv)
+        {
+            try
+            {
+                IntPtr hToken;
+                OpenProcessToken(Process.GetCurrentProcess().Handle, 0x0028, out hToken);
+                long luid;
+                LookupPrivilegeValue(null, priv, out luid);
+                TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
+                tp.PrivilegeCount = 1;
+                tp.Luid = luid;
+                tp.Attributes = 0x00000002;
+                AdjustTokenPrivileges(hToken, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+            }
+            catch { }
         }
 
         private void InitializeLpc()
@@ -132,7 +180,6 @@ namespace NucFanControlGUI
 
                 ExecLpc("ioctl_select_slot", new long[] { 0 }, 0);
 
-                // Enter SIO config (0x87, 0x87)
                 WritePort(0x2E, 0x87);
                 WritePort(0x2E, 0x87);
 
@@ -144,11 +191,8 @@ namespace NucFanControlGUI
                 }
 
                 ExecLpc("ioctl_find_bars", Array.Empty<long>(), 0);
-
-                // LDN 0x0B (Hardware Monitor)
                 WriteByte(0x07, 0x0B);
 
-                // Unlock CR 0x28
                 byte cr28 = ReadByte(0x28);
                 if ((cr28 & 0x10) != 0)
                 {
@@ -196,6 +240,7 @@ namespace NucFanControlGUI
                 if (val >= 70 && val <= 115) _tjMax = val;
 
                 _lastEnergy = ReadMsr(0x611);
+                _lastGpuEnergy = ReadMsr(0x641);
                 _lastEnergyTime = DateTime.UtcNow;
                 _isMsrInitialized = true;
             }
@@ -320,7 +365,6 @@ namespace NucFanControlGUI
                 uint digital = (uint)((therm >> 16) & 0x7F);
                 core0 = (float)(_tjMax - digital);
 
-                // Thermal Watchdog Check: if core > 85C, trip safety
                 if (core0 >= 85.0f && !_watchdogTripped)
                 {
                     _watchdogTripped = true;
@@ -333,7 +377,6 @@ namespace NucFanControlGUI
                 }
             }
 
-            // Process Autonomous Dynamic Fan Curve if enabled and watchdog not tripped
             if (CurveConfig.IsEnabled && !_watchdogTripped)
             {
                 ProcessDynamicCurve(cputin > core0 ? cputin : core0);
@@ -379,21 +422,29 @@ namespace NucFanControlGUI
             byte lo = ReadHwm(6, 0x59);
             int rpm = (hi << 8) | lo;
 
-            byte mode = ReadHwm(1, 0x02);
-            byte pwm = ReadHwm(1, 0x09);
+            // Bank 2 is the physical CPU fan header
+            byte mode = ReadHwm(2, 0x02);
+            byte pwm = ReadHwm(2, 0x09);
             int pct = (int)Math.Round((pwm * 100.0) / 255.0);
             return (rpm, pwm, pct, mode);
         }
 
         public void SetFanManual(byte pwm)
         {
-            WriteHwm(1, 0x02, 0x00);
-            WriteHwm(1, 0x09, pwm);
+            // Apply across Banks 1, 2, and 3 to sync all chassis and CPU fan channels
+            for (byte b = 1; b <= 3; b++)
+            {
+                WriteHwm(b, 0x02, 0x00);
+                WriteHwm(b, 0x09, pwm);
+            }
         }
 
         public void SetFanAuto()
         {
-            WriteHwm(1, 0x02, 0x40);
+            for (byte b = 1; b <= 3; b++)
+            {
+                WriteHwm(b, 0x02, 0x45); // SmartFan IV mode with CPU temp tracking
+            }
         }
 
         public (double watts, double mhz, double pl1, double pl2) GetCpuTelemetry()
@@ -409,7 +460,6 @@ namespace NucFanControlGUI
                 double deltaJ = (uint)(curEnergy - _lastEnergy) * _energyUnit;
                 watts = deltaJ / elapsed;
                 _lastEnergy = curEnergy;
-                _lastEnergyTime = now;
             }
 
             ulong perf = ReadMsr(0x198);
@@ -421,6 +471,42 @@ namespace NucFanControlGUI
             double pl2 = ((pwr >> 32) & 0x7FFF) / 8.0;
 
             return (watts, mhz, pl1, pl2);
+        }
+
+        public GpuTelemetry GetGpuTelemetry()
+        {
+            var gt = new GpuTelemetry();
+            if (!_isMsrInitialized) return gt;
+
+            // Real-time GPU energy from MSR 0x641
+            ulong curGpuEnergy = ReadMsr(0x641);
+            DateTime now = DateTime.UtcNow;
+            double elapsed = (now - _lastEnergyTime).TotalSeconds;
+            if (elapsed > 0.1 && _lastGpuEnergy > 0)
+            {
+                double deltaJ = (uint)(curGpuEnergy - _lastGpuEnergy) * _energyUnit;
+                gt.GpuWatts = deltaJ / elapsed;
+                _lastGpuEnergy = curGpuEnergy;
+                _lastEnergyTime = now;
+            }
+            else
+            {
+                _lastGpuEnergy = curGpuEnergy;
+            }
+
+            // GPU Policy preference from MSR 0x642
+            ulong policyMsr = ReadMsr(0x642);
+            gt.Policy = (uint)(policyMsr & 0x1F);
+
+            return gt;
+        }
+
+        public void SetGpuPolicy(uint policy)
+        {
+            if (!_isMsrInitialized) return;
+            ulong cur = ReadMsr(0x642);
+            ulong updated = (cur & ~0x1FUL) | (policy & 0x1FUL);
+            WriteMsr(0x642, updated);
         }
 
         public CpuHardwareSpecs GetCpuHardwareSpecs()
@@ -471,6 +557,36 @@ namespace NucFanControlGUI
             updated = (updated & ~(0x7FFFUL << 32)) | (pl2Raw << 32);
 
             WriteMsr(0x610, updated);
+        }
+
+        public List<string> GetUefiBootEntries()
+        {
+            var entries = new List<string>();
+            try
+            {
+                string uefiGlobal = "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}";
+                byte[] buf = new byte[2048];
+                uint read = GetFirmwareEnvironmentVariableW("BootOrder", uefiGlobal, buf, (uint)buf.Length);
+                if (read > 0)
+                {
+                    for (int i = 0; i < read; i += 2)
+                    {
+                        ushort num = BitConverter.ToUInt16(buf, i);
+                        string bName = string.Format("Boot{0:X4}", num);
+                        byte[] bBuf = new byte[1024];
+                        uint bRead = GetFirmwareEnvironmentVariableW(bName, uefiGlobal, bBuf, (uint)bBuf.Length);
+                        if (bRead > 6)
+                        {
+                            string desc = Encoding.Unicode.GetString(bBuf, 6, (int)bRead - 6);
+                            int nullIdx = desc.IndexOf(' ');
+                            if (nullIdx >= 0) desc = desc.Substring(0, nullIdx);
+                            entries.Add(string.Format("{0}: {1}", bName, desc));
+                        }
+                    }
+                }
+            }
+            catch { }
+            return entries;
         }
 
         public static bool IsBootMaxEnabled()

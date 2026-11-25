@@ -92,7 +92,7 @@
                     <StackPanel Margin="0,8,0,0">
                         <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
                             <StackPanel>
-                                <TextBlock Text="FAN TACHOMETER &amp; OVER-ROTATION" FontSize="11" FontWeight="Bold" Foreground="#38BDF8" Margin="0,0,0,8"/>
+                                <TextBlock Text="FAN TACHOMETER &amp; OVER-ROTATION (UP TO 7500 RPM)" FontSize="11" FontWeight="Bold" Foreground="#38BDF8" Margin="0,0,0,8"/>
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -116,7 +116,7 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <Button x:Name="BtnMax" Grid.Column="0" Height="36" Background="#EF4444" Click="BtnMax_Click">
-                                        <TextBlock Text="🚀 MAXIMUM OVER-ROTATE (100%)" FontSize="11" FontWeight="Bold"/>
+                                        <TextBlock Text="🚀 MAXIMUM OVER-ROTATE (7500 RPM)" FontSize="11" FontWeight="Bold"/>
                                     </Button>
                                     <Button x:Name="BtnAuto" Grid.Column="2" Height="36" Background="#10B981" Click="BtnAuto_Click">
                                         <TextBlock Text="⚙ BIOS AUTO (SmartFan IV)" FontSize="11" FontWeight="Bold"/>
@@ -124,14 +124,14 @@
                                 </Grid>
 
                                 <UniformGrid Columns="4" Margin="0,0,0,8">
-                                    <Button Style="{StaticResource PresetChip}" Content="50% Quiet" Click="FanPreset_Click" Tag="50"/>
-                                    <Button Style="{StaticResource PresetChip}" Content="70% Cool" Click="FanPreset_Click" Tag="70"/>
-                                    <Button Style="{StaticResource PresetChip}" Content="85% Heavy" Click="FanPreset_Click" Tag="85"/>
-                                    <Button Style="{StaticResource PresetChip}" Content="95% Extreme" Click="FanPreset_Click" Tag="95"/>
+                                    <Button Style="{StaticResource PresetChip}" Content="25% Quiet" Click="FanPreset_Click" Tag="25"/>
+                                    <Button Style="{StaticResource PresetChip}" Content="50% Balanced" Click="FanPreset_Click" Tag="50"/>
+                                    <Button Style="{StaticResource PresetChip}" Content="75% Heavy" Click="FanPreset_Click" Tag="75"/>
+                                    <Button Style="{StaticResource PresetChip}" Content="100% Max" Click="FanPreset_Click" Tag="100"/>
                                 </UniformGrid>
 
                                 <Grid Margin="0,2,0,0">
-                                    <TextBlock Text="Manual Speed Slider" FontSize="10" Foreground="#94A3B8"/>
+                                    <TextBlock Text="Manual Speed Slider (Banks 1, 2, 3 Synchronized)" FontSize="10" Foreground="#94A3B8"/>
                                     <TextBlock x:Name="TxtSliderVal" Text="100%" FontSize="11" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Right"/>
                                 </Grid>
                                 <Slider x:Name="SliderPwm" Minimum="10" Maximum="100" Value="100" SmallChange="1" LargeChange="5" Margin="0,4,0,0" ValueChanged="SliderPwm_ValueChanged"/>
@@ -386,6 +386,32 @@
 
                         <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
                             <StackPanel>
+                                <TextBlock Text="iGPU PERFORMANCE &amp; POWER POLICY (MSR 0x642)" FontSize="11" FontWeight="Bold" Foreground="#F59E0B" Margin="0,0,0,8"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="iGPU REAL-TIME POWER" FontSize="10" FontWeight="Bold" Foreground="#64748B"/>
+                                        <TextBlock x:Name="TxtGpuWatts" Text="0.0 W" FontSize="20" FontWeight="Bold" Foreground="#F59E0B" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="ENERGY PREFERENCE" FontSize="10" FontWeight="Bold" Foreground="#64748B"/>
+                                        <TextBlock x:Name="TxtGpuPolicy" Text="Policy: 13 (Balanced)" FontSize="12" FontWeight="SemiBold" Foreground="#38BDF8" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <UniformGrid Columns="3" Margin="0,4,0,0">
+                                    <Button Style="{StaticResource PresetChip}" Content="🚀 MAX GAMING/AI (0)" Click="GpuPolicy_Click" Tag="0"/>
+                                    <Button Style="{StaticResource PresetChip}" Content="⚖ BALANCED (13)" Click="GpuPolicy_Click" Tag="13"/>
+                                    <Button Style="{StaticResource PresetChip}" Content="🌱 ECO SAVER (24)" Click="GpuPolicy_Click" Tag="24"/>
+                                </UniformGrid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
+                            <StackPanel>
                                 <TextBlock Text="SHARED VRAM &amp; DVMT APERTURE" FontSize="11" FontWeight="Bold" Foreground="#C084FC" Margin="0,0,0,8"/>
                                 <TextBlock Text="System Memory: 32 GB Dual-Channel DDR4 installed" FontSize="11" Foreground="#E2E8F0"/>
                                 <TextBlock Text="Maximum Dynamic VRAM: Up to 16 GB allocatable by OS" FontSize="11" Foreground="#94A3B8" Margin="0,4,0,0"/>
@@ -416,6 +442,20 @@
                                     <TextBlock Text="Keep 100% MAXIMUM fan speed on Windows boot and user logon" FontWeight="SemiBold"/>
                                 </CheckBox>
                                 <TextBlock Text="Applies full cooling over-rotation immediately when computer starts via Task Scheduler." FontSize="9" Foreground="#64748B" Margin="22,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CyberCard}" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="PHYSICAL UEFI BOOT ORDER (IN-WINDOWS BIOS)" FontSize="11" FontWeight="Bold" Foreground="#10B981" Margin="0,0,0,6"/>
+                                <ItemsControl x:Name="ListBootOrder" Margin="0,2,0,4">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" FontSize="11" Foreground="#E2E8F0" Margin="0,2,0,2"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="Setup NVRAM: Present (4093 Bytes in {EC87D643-EBA4-4BB5-A1E5-3F3E36B20DA9})" FontSize="9" Foreground="#64748B" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
 

@@ -126,8 +126,9 @@ impl Nct5577 {
         let rpm_lo = self.read_hwm(6, 0x59)? as u16;
         let rpm = (rpm_hi << 8) | rpm_lo;
 
-        let mode = self.read_hwm(1, 0x02)?;
-        let pwm = self.read_hwm(1, 0x09)?;
+        // Bank 2 is physical CPU fan header
+        let mode = self.read_hwm(2, 0x02)?;
+        let pwm = self.read_hwm(2, 0x09)?;
         let percent = ((pwm as u32 * 100 + 127) / 255) as u8;
 
         Ok(FanStatus {
@@ -139,15 +140,18 @@ impl Nct5577 {
     }
 
     pub fn set_fan_manual(&self, pwm: u8) -> io::Result<()> {
-        // Mode 0x00 = Manual Mode
-        self.write_hwm(1, 0x02, 0x00)?;
-        self.write_hwm(1, 0x09, pwm)?;
+        // Synchronize across Banks 1, 2, and 3
+        for b in 1..=3 {
+            self.write_hwm(b, 0x02, 0x00)?;
+            self.write_hwm(b, 0x09, pwm)?;
+        }
         Ok(())
     }
 
     pub fn set_fan_auto(&self) -> io::Result<()> {
-        // Mode 0x40 = SmartFan IV (BIOS automatic control)
-        self.write_hwm(1, 0x02, 0x40)?;
+        for b in 1..=3 {
+            self.write_hwm(b, 0x02, 0x45)?;
+        }
         Ok(())
     }
 }

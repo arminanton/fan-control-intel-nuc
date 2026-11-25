@@ -54,6 +54,13 @@ namespace NucFanControlGUI
             if (SliderCurveFull != null) SliderCurveFull.Value = _backend.CurveConfig.FullTemp;
             if (SliderCurveMinDuty != null) SliderCurveMinDuty.Value = _backend.CurveConfig.MinDuty;
 
+            // Populate UEFI Boot Order
+            var bootEntries = _backend.GetUefiBootEntries();
+            if (ListBootOrder != null)
+            {
+                ListBootOrder.ItemsSource = bootEntries;
+            }
+
             _timer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
@@ -87,6 +94,7 @@ namespace NucFanControlGUI
             var fan = _backend.GetFanStatus();
             var cpu = _backend.GetCpuTelemetry();
             var rails = _backend.GetVoltageRails();
+            var gpu = _backend.GetGpuTelemetry();
 
             // Update Fan Tachometer
             if (TxtFanRpm != null) TxtFanRpm.Text = string.Format("{0} RPM", fan.rpm);
@@ -96,7 +104,7 @@ namespace NucFanControlGUI
                 if (_backend.CurveConfig.IsEnabled)
                     TxtMode.Text = string.Format("Mode: Autonomous Curve (PWM {0})", fan.pwm);
                 else
-                    TxtMode.Text = fan.mode == 0x40 ? "Mode: BIOS SmartFan IV" : string.Format("Mode: Manual (PWM {0})", fan.pwm);
+                    TxtMode.Text = fan.mode == 0x45 ? "Mode: BIOS SmartFan IV" : string.Format("Mode: Manual (PWM {0})", fan.pwm);
             }
 
             // Update Thermal Zones
@@ -126,6 +134,20 @@ namespace NucFanControlGUI
             if (TxtPlSummary != null) TxtPlSummary.Text = string.Format("PL1: {0:F0}W | PL2: {1:F0}W", cpu.pl1, cpu.pl2);
             if (TxtClock != null) TxtClock.Text = string.Format("{0:F0} MHz", cpu.mhz);
 
+            // Update iGPU Telemetry
+            if (TxtGpuWatts != null) TxtGpuWatts.Text = string.Format("{0:F1} W", gpu.GpuWatts);
+            if (TxtGpuPolicy != null)
+            {
+                string pName = gpu.Policy switch
+                {
+                    0 => "Policy: 0 (Maximum Performance / Gaming / AI)",
+                    13 => "Policy: 13 (Balanced)",
+                    24 => "Policy: 24 (Power Saver)",
+                    _ => string.Format("Policy: {0}", gpu.Policy)
+                };
+                TxtGpuPolicy.Text = pName;
+            }
+
             // Update Safety Watchdog Status
             if (TxtWatchdogStatus != null)
             {
@@ -145,7 +167,7 @@ namespace NucFanControlGUI
             if (!_isUpdatingUi && !_backend.CurveConfig.IsEnabled && SliderPwm != null && TxtSliderVal != null)
             {
                 _isUpdatingUi = true;
-                if (fan.mode != 0x40)
+                if (fan.mode != 0x45)
                 {
                     SliderPwm.Value = fan.percent;
                     TxtSliderVal.Text = string.Format("{0}%", fan.percent);
@@ -301,6 +323,15 @@ namespace NucFanControlGUI
             }
 
             _backend.SetPowerLimits(_currentPl1, _currentPl2);
+        }
+
+        private void GpuPolicy_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string tagStr && uint.TryParse(tagStr, out uint pol))
+            {
+                _backend.SetGpuPolicy(pol);
+                RefreshTelemetry();
+            }
         }
 
         private void ChkBootMax_Changed(object sender, RoutedEventArgs e)
