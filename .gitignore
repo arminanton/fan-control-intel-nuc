@@ -1,0 +1,17 @@
+# Rust
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# .NET / C#
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+**/*.userosscache
+**/*.suo
+**/*.pdb
+
+# OS
+Thumbs.db
+[Dd]esktop.ini

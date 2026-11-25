@@ -1,33 +1,71 @@
-# FanControl.IntelNUCSoftwareStudioPlugin
+# Intel NUC Hardware Fan Control Suite
 
-# WARNING - This code is experimental and you use at your own risk
+Native hardware fan controller and monitoring suite engineered specifically for Intel NUC systems featuring Nuvoton Super I/O chips, such as the Intel NUC Kit NUC6i7KYK (Skull Canyon).
 
-I found the Intel NUC Software Studio app for controlling fans a little too basic, and the fan curves too reactive to short changes in CPU temperature, so wanted to let Fan Control control the fans instead
+## Overview
 
-I've tested this with the Intel NUC 11 Extreme i9 model (NUC11BTMi9), I expect it will probably work with other 11 Extremes, and with some tweaking newer models too
+Modern Intel NUC tools like Intel NUC Software Studio only support 11th Gen and newer NUC platforms via proprietary WMI endpoints. Older high-performance NUC models like the Skull Canyon (NUC6i7KYK with Core i7-6770HQ) lack those WMI services, leaving users without functional software cooling control.
 
-# Requirements
-- Intel NUC Software Studio installed
-- Fan Control
-- Drop the provided dlls in the plugin directory and restart Fan Control
+This repository provides a complete replacement:
+1. Native Ring-0 Kernel Driver Bridge (PawnIO 2.2.0) to safely talk to LPC Super I/O ports.
+2. Low-Level Super I/O Protocol Driver for Nuvoton NCT5577D / NCT6776F.
+3. Native Rust CLI tool (`nuc-fan-control.exe`) for status, monitoring, dynamic curve daemon, and scripted overrides.
+4. Modern Windows Desktop GUI (`NucFanControlGUI.exe`) featuring real-time tachometer telemetry, quick cooling presets, custom slider, and boot persistence.
 
-# Limitations
-- You must set all the fan curves (CPU, System 1 and 2) with Fan Control or none of them, you can't just set the System 2 fan with this and leave the CPU alone, its all or nothing
-- I've conservatively coded defaults of 25% fan speed everywhere, but you can customise to taste in fan control
+## Hardware Specification
 
-# Bits of info for people who want to make the code better
-- Intel NUC Software Studio app talks to a "Intel NUC Software Studio Service" running all the time in Windows Services
-- When I looked at the strings in the app, I saw some references to WCF endpoints
-- Loaded the WCF endpoints locally: http://localhost:43568/NssService/service/PerformanceTuning for instance
- - It might be the case that these endpoints are on different ports on each machine, in which case it needs to be made configurable
-- I couldn't get half of the endpoints to do anything, it seems as if you need to set three fan profiles consistently when accessing these APIs, I just tried different things until it worked
-- Found one endpoint that effectively just lets me set the fan speed, all the magic happens in StaticFanController.cs
-- If you close Fan Control, you can go back to your normal profiles set in the NUC app
-- This code is perfect garbage and zero time has been spent making it nice to work with, I stopped when it seemed to be working
+* Target Platform: Intel NUC Kit NUC6i7KYK (Skull Canyon)
+* Motherboard: Intel NUC6i7KYB
+* CPU: Intel Core i7-6770HQ (4 Cores, 8 Threads, 45W TDP)
+* Super I/O Chip: Nuvoton NCT5577D (reports Chip ID 0xC333, compatible with NCT6776F family)
+* Configuration Ports: 0x2E (Index), 0x2F (Data)
+* Hardware Monitor Logical Device: LDN 0x0B
+* Hardware Monitor Base Port: 0x0A00 (Index 0x0A05, Data 0x0A06)
 
-# Tips for fan settings
-- CPU fan should be left on a minimum duty, I've found 25% works and is not audible, anything less than this and it stalls and you get "pulsing" as it spins back up to speed
-- Case fans can go to zero, I make everything start to spin up once the CPU or GPU is 65C or above
-- 100% duty makes these fans go to 5000rpm, the CPU gets to 4000 but they sound horrible, so wouldn't recommend that, max 2000 on both case and CPU seems to get air through the case just fine
+## Register Mapping and Control Logic
 
-I don't plan on making any more changes to this, but with a bit of love it could be turned into a fully fledged plugin like: https://github.com/Rem0o/FanControl.DellPlugin
+* Config Mode Entry: Write `0x87, 0x87` to port `0x2E`.
+* Unlock I/O Space: Clear bit 4 of Configuration Register `0x28`.
+* Select Bank: Write bank number to HWM register `0x4E` (Port `0x0A05 = 0x4E`, Data `0x0A06`).
+* Fan Mode (Bank 1, Register `0x02`):
+  * `0x00`: Manual PWM mode (software control).
+  * `0x40`: SmartFan IV mode (BIOS automatic curve).
+* Fan PWM Output (Bank 1, Register `0x09`):
+  * Value `0` to `255` (`255` = 100% full tilt over-rotation).
+* Fan Tachometer (Bank 6, Registers `0x58` and `0x59`):
+  * 16-bit RPM counter directly read from hardware.
+* Temperatures (Bank 0):
+  * Register `0x73` / `0x74`: CPU Socket Temperature (CPUTIN).
+  * Register `0x75` / `0x76`: Auxiliary Temperature (AUXTIN).
+  * Register `0x77` / `0x78`: System Board Temperature (SYSTIN).
+
+## Project Structure
+
+* `cli/`: Rust engine and CLI (`nuc-fan-control.exe`).
+* `gui/`: Windows Presentation Foundation (WPF) GUI (`NucFanControlGUI.exe`).
+* `assets/`: Signed driver blobs and binary modules (`LpcIO.bin`).
+
+## Usage
+
+### CLI Commands
+
+```text
+nuc-fan-control status
+nuc-fan-control max
+nuc-fan-control set 80%
+nuc-fan-control auto
+nuc-fan-control monitor
+nuc-fan-control enable-boot-max
+nuc-fan-control disable-boot-max
+```
+
+### GUI Application
+
+Launch `NucFanControlGUI.exe`. It provides:
+* Live dashboard showing CPU, System, and Aux temperatures.
+* Real-time tachometer showing actual fan RPM and duty percentage.
+* One-click Maximum Cooling button (100% full tilt).
+* One-click BIOS Auto button to restore default fan curves.
+* Quick preset buttons (50% Quiet, 70% Cool, 85% Heavy, 95% Extreme).
+* Granular custom fan speed slider.
+* Checkbox for startup persistence via Windows Task Scheduler.
