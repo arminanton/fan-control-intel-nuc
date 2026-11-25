@@ -12,6 +12,9 @@ namespace NucFanControlGUI
         private readonly DispatcherTimer _timer;
         private bool _isUpdatingUi = true;
 
+        private double _currentPl1 = 50.0;
+        private double _currentPl2 = 60.0;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -20,6 +23,16 @@ namespace NucFanControlGUI
 
             // Check boot persistence
             ChkBootMax.IsChecked = FanBackend.IsBootMaxEnabled();
+
+            // Query initial power limits from MSR
+            var cpu = _backend.GetCpuTelemetry();
+            if (cpu.pl1 > 0) _currentPl1 = cpu.pl1;
+            if (cpu.pl2 > 0) _currentPl2 = cpu.pl2;
+
+            if (SliderPl1 != null) SliderPl1.Value = _currentPl1;
+            if (SliderPl2 != null) SliderPl2.Value = _currentPl2;
+            if (TxtPl1Val != null) TxtPl1Val.Text = string.Format("{0:F0}W", _currentPl1);
+            if (TxtPl2Val != null) TxtPl2Val.Text = string.Format("{0:F0}W", _currentPl2);
 
             // Set up 1-second polling timer
             _timer = new DispatcherTimer
@@ -54,39 +67,66 @@ namespace NucFanControlGUI
 
             var temps = _backend.GetTemperatures();
             var fan = _backend.GetFanStatus();
+            var cpu = _backend.GetCpuTelemetry();
 
-            // Update Temp
+            // Update Temperature Card
             if (TxtCpuTemp != null)
             {
-                TxtCpuTemp.Text = $"{temps.cpuTemp:F1}°C";
+                TxtCpuTemp.Text = string.Format("{0:F1}°C", temps.cpuTemp);
                 if (temps.cpuTemp > 80)
-                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Crimson
                 else if (temps.cpuTemp > 65)
                     TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
                 else
-                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94)); // Green
+                    TxtCpuTemp.Foreground = new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Emerald
             }
 
-            // Update Fan
-            if (TxtFanRpm != null) TxtFanRpm.Text = $"{fan.rpm} RPM";
-            if (TxtDuty != null) TxtDuty.Text = $"{fan.percent}%";
-            if (TxtMode != null) TxtMode.Text = fan.mode == 0x40 ? "BIOS SmartFan IV" : $"Manual (PWM {fan.pwm})";
+            if (TxtCoreTemp != null)
+            {
+                TxtCoreTemp.Text = string.Format("Core: {0:F0}°C", cpu.coreTemp);
+            }
 
-            // Update Slider without triggering event loop
+            // Update Fan Speed Card
+            if (TxtFanRpm != null) TxtFanRpm.Text = string.Format("{0} RPM", fan.rpm);
+            if (TxtDuty != null) TxtDuty.Text = string.Format("Duty: {0}%", fan.percent);
+
+            // Update Package Power Card (Watts)
+            if (TxtWatts != null)
+            {
+                TxtWatts.Text = string.Format("{0:F1} W", cpu.watts);
+            }
+            if (TxtPlLimits != null)
+            {
+                TxtPlLimits.Text = string.Format("PL1: {0:F0}W | PL2: {1:F0}W", cpu.pl1, cpu.pl2);
+            }
+
+            // Update CPU Clock Card
+            if (TxtClock != null)
+            {
+                TxtClock.Text = string.Format("{0:F0} MHz", cpu.mhz);
+            }
+            if (TxtMode != null)
+            {
+                TxtMode.Text = fan.mode == 0x40 ? "BIOS Auto" : string.Format("PWM {0}", fan.pwm);
+            }
+
+            // Update Fan Slider without feedback loop
             if (!_isUpdatingUi && SliderPwm != null && TxtSliderVal != null)
             {
                 _isUpdatingUi = true;
                 if (fan.mode != 0x40)
                 {
                     SliderPwm.Value = fan.percent;
-                    TxtSliderVal.Text = $"{fan.percent}%";
+                    TxtSliderVal.Text = string.Format("{0}%", fan.percent);
                 }
                 _isUpdatingUi = false;
             }
 
-            // Board temps
+            // Board Sensors Footer
             if (TxtBoardTemps != null)
-                TxtBoardTemps.Text = $"Board: SYSTIN {temps.sysTemp:F1}°C | AUXTIN {temps.auxTemp:F1}°C";
+            {
+                TxtBoardTemps.Text = string.Format("Board: SYSTIN {0:F1}°C | AUXTIN {1:F1}°C | eDRAM: 128MB L4 Active", temps.sysTemp, temps.auxTemp);
+            }
         }
 
         private void BtnMax_Click(object sender, RoutedEventArgs e)
@@ -105,7 +145,7 @@ namespace NucFanControlGUI
             RefreshTelemetry();
         }
 
-        private void Preset_Click(object sender, RoutedEventArgs e)
+        private void FanPreset_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button btn && btn.Tag is string tagStr && int.TryParse(tagStr, out int pct))
             {
@@ -113,7 +153,7 @@ namespace NucFanControlGUI
                 _backend.SetFanManual(pwm);
                 _isUpdatingUi = true;
                 if (SliderPwm != null) SliderPwm.Value = pct;
-                if (TxtSliderVal != null) TxtSliderVal.Text = $"{pct}%";
+                if (TxtSliderVal != null) TxtSliderVal.Text = string.Format("{0}%", pct);
                 _isUpdatingUi = false;
                 RefreshTelemetry();
             }
@@ -124,10 +164,63 @@ namespace NucFanControlGUI
             if (_isUpdatingUi || TxtSliderVal == null) return;
 
             int pct = (int)Math.Round(e.NewValue);
-            TxtSliderVal.Text = $"{pct}%";
+            TxtSliderVal.Text = string.Format("{0}%", pct);
 
             byte pwm = (byte)Math.Round((pct * 255.0) / 100.0);
             _backend.SetFanManual(pwm);
+        }
+
+        private void PowerPreset_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string tagStr && double.TryParse(tagStr, out double pl1))
+            {
+                double pl2 = pl1 + 10.0;
+                _currentPl1 = pl1;
+                _currentPl2 = pl2;
+
+                _backend.SetPowerLimits(_currentPl1, _currentPl2);
+
+                _isUpdatingUi = true;
+                if (SliderPl1 != null) SliderPl1.Value = _currentPl1;
+                if (SliderPl2 != null) SliderPl2.Value = _currentPl2;
+                if (TxtPl1Val != null) TxtPl1Val.Text = string.Format("{0:F0}W", _currentPl1);
+                if (TxtPl2Val != null) TxtPl2Val.Text = string.Format("{0:F0}W", _currentPl2);
+                _isUpdatingUi = false;
+
+                RefreshTelemetry();
+            }
+        }
+
+        private void SliderPl1_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isUpdatingUi || TxtPl1Val == null) return;
+
+            _currentPl1 = Math.Round(e.NewValue);
+            TxtPl1Val.Text = string.Format("{0:F0}W", _currentPl1);
+
+            if (_currentPl1 > _currentPl2)
+            {
+                _currentPl2 = _currentPl1;
+                if (SliderPl2 != null) SliderPl2.Value = _currentPl2;
+            }
+
+            _backend.SetPowerLimits(_currentPl1, _currentPl2);
+        }
+
+        private void SliderPl2_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isUpdatingUi || TxtPl2Val == null) return;
+
+            _currentPl2 = Math.Round(e.NewValue);
+            TxtPl2Val.Text = string.Format("{0:F0}W", _currentPl2);
+
+            if (_currentPl2 < _currentPl1)
+            {
+                _currentPl1 = _currentPl2;
+                if (SliderPl1 != null) SliderPl1.Value = _currentPl1;
+            }
+
+            _backend.SetPowerLimits(_currentPl1, _currentPl2);
         }
 
         private void ChkBootMax_Changed(object sender, RoutedEventArgs e)

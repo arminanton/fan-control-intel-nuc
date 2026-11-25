@@ -43,25 +43,31 @@ namespace NucFanControlGUI
             out uint lpBytesReturned,
             IntPtr lpOverlapped);
 
-        private SafeFileHandle _handle;
+        private SafeFileHandle? _hLpc;
+        private SafeFileHandle? _hMsr;
         private ushort _hwmBase = 0x0A00;
-        private bool _isInitialized = false;
+        private bool _isLpcInitialized = false;
+        private bool _isMsrInitialized = false;
 
-        public bool IsInitialized => _isInitialized;
+        private uint _tjMax = 100;
+        private double _energyUnit = 0.00006103515625;
+        private ulong _lastEnergy = 0;
+        private DateTime _lastEnergyTime = DateTime.UtcNow;
+
+        public bool IsInitialized => _isLpcInitialized;
+        public bool IsMsrAvailable => _isMsrInitialized;
 
         public FanBackend()
         {
-            Initialize();
+            InitializeLpc();
+            InitializeMsr();
         }
 
-        private void Initialize()
+        private void InitializeLpc()
         {
-            var logPath = @"C:\ProgramData\fan_debug.log";
             try
             {
-                File.WriteAllText(logPath, "Starting Initialize as " + Environment.UserName + "\n");
-
-                _handle = CreateFile(@"\\?\GLOBALROOT\Device\PawnIO",
+                _hLpc = CreateFile(@"\\?\GLOBALROOT\Device\PawnIO",
                     GENERIC_READ | GENERIC_WRITE,
                     FILE_SHARE_READ | FILE_SHARE_WRITE,
                     IntPtr.Zero,
@@ -69,46 +75,27 @@ namespace NucFanControlGUI
                     FILE_ATTRIBUTE_NORMAL,
                     IntPtr.Zero);
 
-                int err1 = Marshal.GetLastWin32Error();
-                File.AppendAllText(logPath, "CreateFile handle invalid: " + _handle.IsInvalid + " Win32Err: " + err1 + "\n");
-                if (_handle.IsInvalid) return;
-
-                if (!File.Exists(@"C:\ProgramData\LpcIO.bin"))
-                {
-                    File.AppendAllText(logPath, "LpcIO.bin does NOT exist!\n");
-                    return;
-                }
+                if (_hLpc.IsInvalid) return;
 
                 byte[] bin = File.ReadAllBytes(@"C:\ProgramData\LpcIO.bin");
-                File.AppendAllText(logPath, "LpcIO.bin size: " + bin.Length + "\n");
-
                 uint returned;
-                if (!DeviceIoControl(_handle, CTL_LOAD, bin, (uint)bin.Length, null, 0, out returned, IntPtr.Zero))
-                {
-                    int err2 = Marshal.GetLastWin32Error();
-                    File.AppendAllText(logPath, "DeviceIoControl CTL_LOAD failed! Win32Err: " + err2 + "\n");
+                if (!DeviceIoControl(_hLpc, CTL_LOAD, bin, (uint)bin.Length, null, 0, out returned, IntPtr.Zero))
                     return;
-                }
-                File.AppendAllText(logPath, "CTL_LOAD success\n");
 
-                Exec("ioctl_select_slot", new long[] { 0 }, 0);
-                File.AppendAllText(logPath, "select_slot 0 done\n");
+                ExecLpc("ioctl_select_slot", new long[] { 0 }, 0);
 
                 // Enter SIO config (0x87, 0x87)
                 WritePort(0x2E, 0x87);
                 WritePort(0x2E, 0x87);
 
                 byte id = ReadByte(0x20);
-                File.AppendAllText(logPath, "Read SIO ID: 0x" + id.ToString("X2") + "\n");
                 if (id != 0xC3)
                 {
                     WritePort(0x2E, 0xAA);
-                    File.AppendAllText(logPath, "ID is not 0xC3, exiting\n");
                     return;
                 }
 
-                Exec("ioctl_find_bars", new long[0], 0);
-                File.AppendAllText(logPath, "find_bars done\n");
+                ExecLpc("ioctl_find_bars", Array.Empty<long>(), 0);
 
                 // LDN 0x0B (Hardware Monitor)
                 WriteByte(0x07, 0x0B);
@@ -123,22 +110,58 @@ namespace NucFanControlGUI
                 byte baseHi = ReadByte(0x60);
                 byte baseLo = ReadByte(0x61);
                 _hwmBase = (ushort)((baseHi << 8) | baseLo);
-                File.AppendAllText(logPath, "hwmBase: 0x" + _hwmBase.ToString("X4") + "\n");
 
                 WritePort(0x2E, 0xAA);
-                _isInitialized = true;
-                File.AppendAllText(logPath, "Successfully initialized!\n");
+                _isLpcInitialized = true;
             }
-            catch (Exception ex)
+            catch
             {
-                File.AppendAllText(logPath, "Exception in Initialize: " + ex.ToString() + "\n");
-                _isInitialized = false;
+                _isLpcInitialized = false;
             }
         }
 
-        private long[] Exec(string fn, long[] inArgs, int outCount)
+        private void InitializeMsr()
         {
-            if (_handle == null || _handle.IsInvalid) return new long[outCount];
+            try
+            {
+                _hMsr = CreateFile(@"\\?\GLOBALROOT\Device\PawnIO",
+                    GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    IntPtr.Zero,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    IntPtr.Zero);
+
+                if (_hMsr.IsInvalid) return;
+
+                byte[] bin = File.ReadAllBytes(@"C:\ProgramData\IntelMSR.bin");
+                uint returned;
+                if (!DeviceIoControl(_hMsr, CTL_LOAD, bin, (uint)bin.Length, null, 0, out returned, IntPtr.Zero))
+                    return;
+
+                // Query MSR 0x606 for energy units
+                ulong units = ReadMsr(0x606);
+                int energyPow = (int)((units >> 8) & 0x1F);
+                _energyUnit = energyPow > 0 ? 1.0 / (1 << energyPow) : 0.00006103515625;
+
+                // Query MSR 0x1A2 for TjMax
+                ulong tjMsr = ReadMsr(0x1A2);
+                uint val = (uint)((tjMsr >> 16) & 0xFF);
+                if (val >= 70 && val <= 115) _tjMax = val;
+
+                _lastEnergy = ReadMsr(0x611);
+                _lastEnergyTime = DateTime.UtcNow;
+                _isMsrInitialized = true;
+            }
+            catch
+            {
+                _isMsrInitialized = false;
+            }
+        }
+
+        private long[] ExecLpc(string fn, long[] inArgs, int outCount)
+        {
+            if (_hLpc == null || _hLpc.IsInvalid) return new long[outCount];
 
             byte[] inBuf = new byte[32 + inArgs.Length * 8];
             byte[] nameBytes = Encoding.ASCII.GetBytes(fn);
@@ -149,7 +172,7 @@ namespace NucFanControlGUI
             }
             byte[] outBuf = new byte[outCount * 8];
             uint returned;
-            if (!DeviceIoControl(_handle, CTL_EXEC, inBuf, (uint)inBuf.Length, outBuf, (uint)outBuf.Length, out returned, IntPtr.Zero))
+            if (!DeviceIoControl(_hLpc, CTL_EXEC, inBuf, (uint)inBuf.Length, outBuf, (uint)outBuf.Length, out returned, IntPtr.Zero))
             {
                 return new long[outCount];
             }
@@ -158,18 +181,45 @@ namespace NucFanControlGUI
             return res;
         }
 
-        private void WritePort(ushort port, byte val) => Exec("ioctl_pio_outb", new long[] { port, val }, 0);
+        private ulong ReadMsr(uint msr)
+        {
+            if (_hMsr == null || _hMsr.IsInvalid) return 0;
+
+            byte[] inBuf = new byte[32 + 8];
+            Encoding.ASCII.GetBytes("ioctl_read_msr").CopyTo(inBuf, 0);
+            BitConverter.GetBytes((long)msr).CopyTo(inBuf, 32);
+            byte[] outBuf = new byte[8];
+            uint returned;
+            if (!DeviceIoControl(_hMsr, CTL_EXEC, inBuf, (uint)inBuf.Length, outBuf, 8, out returned, IntPtr.Zero))
+                return 0;
+
+            return BitConverter.ToUInt64(outBuf, 0);
+        }
+
+        private void WriteMsr(uint msr, ulong value)
+        {
+            if (_hMsr == null || _hMsr.IsInvalid) return;
+
+            byte[] inBuf = new byte[32 + 16];
+            Encoding.ASCII.GetBytes("ioctl_write_msr").CopyTo(inBuf, 0);
+            BitConverter.GetBytes((long)msr).CopyTo(inBuf, 32);
+            BitConverter.GetBytes((long)value).CopyTo(inBuf, 40);
+            uint returned;
+            DeviceIoControl(_hMsr, CTL_EXEC, inBuf, (uint)inBuf.Length, null, 0, out returned, IntPtr.Zero);
+        }
+
+        private void WritePort(ushort port, byte val) => ExecLpc("ioctl_pio_outb", new long[] { port, val }, 0);
         private byte ReadPort(ushort port)
         {
-            var r = Exec("ioctl_pio_inb", new long[] { port }, 1);
+            var r = ExecLpc("ioctl_pio_inb", new long[] { port }, 1);
             return r.Length > 0 ? (byte)r[0] : (byte)0;
         }
         private byte ReadByte(byte register)
         {
-            var r = Exec("ioctl_superio_inb", new long[] { register }, 1);
+            var r = ExecLpc("ioctl_superio_inb", new long[] { register }, 1);
             return r.Length > 0 ? (byte)r[0] : (byte)0;
         }
-        private void WriteByte(byte register, byte val) => Exec("ioctl_superio_outb", new long[] { register, val }, 0);
+        private void WriteByte(byte register, byte val) => ExecLpc("ioctl_superio_outb", new long[] { register, val }, 0);
 
         private void SetBank(byte bank)
         {
@@ -229,6 +279,56 @@ namespace NucFanControlGUI
             WriteHwm(1, 0x02, 0x40); // BIOS SmartFan IV
         }
 
+        public (double watts, double mhz, float coreTemp, double pl1, double pl2) GetCpuTelemetry()
+        {
+            if (!_isMsrInitialized) return (0, 0, 0, 45, 56);
+
+            // Real-Time Power Calculation via MSR 0x611
+            ulong curEnergy = ReadMsr(0x611);
+            DateTime now = DateTime.UtcNow;
+            double elapsed = (now - _lastEnergyTime).TotalSeconds;
+            double watts = 0;
+            if (elapsed > 0.1)
+            {
+                double deltaJ = (uint)(curEnergy - _lastEnergy) * _energyUnit;
+                watts = deltaJ / elapsed;
+                _lastEnergy = curEnergy;
+                _lastEnergyTime = now;
+            }
+
+            // CPU Ratio / Frequency via MSR 0x198
+            ulong perf = ReadMsr(0x198);
+            uint ratio = (uint)((perf >> 8) & 0xFF);
+            double mhz = ratio * 100.0;
+
+            // Core0 Temperature via MSR 0x19C
+            ulong therm = ReadMsr(0x19C);
+            uint digital = (uint)((therm >> 16) & 0x7F);
+            float coreTemp = (float)(_tjMax - digital);
+
+            // Power Limits via MSR 0x610
+            ulong pwr = ReadMsr(0x610);
+            double pl1 = (pwr & 0x7FFF) / 8.0;
+            double pl2 = ((pwr >> 32) & 0x7FFF) / 8.0;
+
+            return (watts, mhz, coreTemp, pl1, pl2);
+        }
+
+        public void SetPowerLimits(double pl1Watts, double pl2Watts)
+        {
+            if (!_isMsrInitialized) return;
+
+            ulong cur = ReadMsr(0x610);
+            ulong pl1Raw = (ulong)Math.Round(pl1Watts * 8.0) & 0x7FFFUL;
+            ulong pl2Raw = (ulong)Math.Round(pl2Watts * 8.0) & 0x7FFFUL;
+
+            // Retain control bits (enable, clamp, time window) and update power values
+            ulong updated = (cur & ~0x7FFFUL) | pl1Raw;
+            updated = (updated & ~(0x7FFFUL << 32)) | (pl2Raw << 32);
+
+            WriteMsr(0x610, updated);
+        }
+
         public static bool IsBootMaxEnabled()
         {
             try
@@ -240,8 +340,8 @@ namespace NucFanControlGUI
                     CreateNoWindow = true
                 };
                 using var p = Process.Start(psi);
-                p.WaitForExit();
-                return p.ExitCode == 0;
+                p?.WaitForExit();
+                return p?.ExitCode == 0;
             }
             catch
             {
@@ -271,7 +371,8 @@ uc-fan-control.exe"" max"" /SC ONLOGON /RL HIGHEST") { CreateNoWindow = true, Us
 
         public void Dispose()
         {
-            _handle?.Dispose();
+            _hLpc?.Dispose();
+            _hMsr?.Dispose();
         }
     }
 }
