@@ -1,7 +1,7 @@
 <Window x:Class="NucFanControlGUI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Intel NUC Skull Canyon Hyper-Control Suite" Height="740" Width="600"
+        Title="Intel NUC Skull Canyon Hyper-Control Suite" Height="740" Width="600" Icon="app.ico"
         WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize"
         Background="#090D16" Foreground="#E2E8F0" FontFamily="Segoe UI">
     <Window.Resources>
@@ -253,12 +253,12 @@
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="PACKAGE POWER" FontSize="10" FontWeight="Bold" Foreground="#64748B"/>
                                         <TextBlock x:Name="TxtWatts" Text="0.0 W" FontSize="26" FontWeight="Bold" Foreground="#F59E0B" Margin="0,2,0,0"/>
-                                        <TextBlock x:Name="TxtPlSummary" Text="PL1: 50W | PL2: 60W" FontSize="10" Foreground="#38BDF8"/>
+                                        <TextBlock x:Name="TxtCpuLoad" Text="Load: 0% (Idle)" FontSize="10" Foreground="#10B981"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1">
                                         <TextBlock Text="OPERATING CLOCK" FontSize="10" FontWeight="Bold" Foreground="#64748B"/>
                                         <TextBlock x:Name="TxtClock" Text="0 MHz" FontSize="26" FontWeight="Bold" Foreground="#C084FC" Margin="0,2,0,0"/>
-                                        <TextBlock Text="Base: 2600 MHz | Turbo: 3500 MHz" FontSize="10" Foreground="#64748B"/>
+                                        <TextBlock x:Name="TxtPlSummary" Text="PL1: 50W | PL2: 60W (Ceiling)" FontSize="10" Foreground="#38BDF8"/>
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
@@ -398,6 +398,7 @@
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="iGPU REAL-TIME POWER" FontSize="10" FontWeight="Bold" Foreground="#64748B"/>
                                         <TextBlock x:Name="TxtGpuWatts" Text="0.0 W" FontSize="20" FontWeight="Bold" Foreground="#F59E0B" Margin="0,2,0,0"/>
+                                        <TextBlock x:Name="TxtGpuStatus" Text="Status: Idle (350 MHz)" FontSize="10" Foreground="#10B981"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1">
                                         <TextBlock Text="ACTIVE MODE" FontSize="10" FontWeight="Bold" Foreground="#64748B"/>

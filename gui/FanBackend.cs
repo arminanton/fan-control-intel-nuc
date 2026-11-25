@@ -99,6 +99,9 @@ namespace NucFanControlGUI
             IntPtr hTemplateFile);
 
         [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetSystemTimes(out long lpIdleTime, out long lpKernelTime, out long lpUserTime);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool DeviceIoControl(
             SafeFileHandle hDevice,
             uint dwIoControlCode,
@@ -145,7 +148,11 @@ namespace NucFanControlGUI
         private bool _isLpcInitialized = false;
         private bool _isMsrInitialized = false;
 
-        private uint _tjMax = 100;
+                private long _lastIdleTime;
+        private long _lastKernelTime;
+        private long _lastUserTime;
+        private bool _firstTimes = true;
+private uint _tjMax = 100;
         private double _energyUnit = 0.00006103515625;
         private ulong _lastEnergy = 0;
         private ulong _lastGpuEnergy = 0;
@@ -475,9 +482,31 @@ namespace NucFanControlGUI
             }
         }
 
-        public (double watts, double mhz, double pl1, double pl2) GetCpuTelemetry()
+        public double GetSystemCpuUsage()
         {
-            if (!_isMsrInitialized) return (0, 0, 45, 56);
+            if (!GetSystemTimes(out long idle, out long kernel, out long user)) return 0;
+            if (_firstTimes)
+            {
+                _lastIdleTime = idle; _lastKernelTime = kernel; _lastUserTime = user;
+                _firstTimes = false;
+                return 0;
+            }
+
+            long usr = user - _lastUserTime;
+            long ker = kernel - _lastKernelTime;
+            long idl = idle - _lastIdleTime;
+            long sys = ker + usr;
+
+            _lastIdleTime = idle; _lastKernelTime = kernel; _lastUserTime = user;
+            if (sys <= 0) return 0;
+
+            double pct = ((sys - idl) * 100.0) / sys;
+            return Math.Max(0.0, Math.Min(100.0, pct));
+        }
+
+        public (double watts, double mhz, double pl1, double pl2, double usage) GetCpuTelemetry()
+        {
+            if (!_isMsrInitialized) return (0, 0, 45, 56, 0);
 
             ulong curEnergy = ReadMsr(0x611);
             DateTime now = DateTime.UtcNow;
@@ -498,7 +527,9 @@ namespace NucFanControlGUI
             double pl1 = (pwr & 0x7FFF) / 8.0;
             double pl2 = ((pwr >> 32) & 0x7FFF) / 8.0;
 
-            return (watts, mhz, pl1, pl2);
+            double usage = GetSystemCpuUsage();
+
+            return (watts, mhz, pl1, pl2, usage);
         }
 
         public GpuTelemetry GetGpuTelemetry()

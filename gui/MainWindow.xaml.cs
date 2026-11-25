@@ -146,13 +146,44 @@ namespace NucFanControlGUI
             if (TxtVin4 != null) TxtVin4.Text = string.Format("PCH CORE: {0:F3} V", rails.Vin4);
             if (TxtVin6 != null) TxtVin6.Text = string.Format("STANDBY: {0:F3} V", rails.Vin6);
 
-            // Update CPU Power & Clocks
+            // Update CPU Power, Load & Clocks
             if (TxtWatts != null) TxtWatts.Text = string.Format("{0:F1} W", cpu.watts);
-            if (TxtPlSummary != null) TxtPlSummary.Text = string.Format("PL1: {0:F0}W | PL2: {1:F0}W", cpu.pl1, cpu.pl2);
             if (TxtClock != null) TxtClock.Text = string.Format("{0:F0} MHz", cpu.mhz);
+            if (TxtPlSummary != null) TxtPlSummary.Text = string.Format("PL1: {0:F0}W | PL2: {1:F0}W (Ceiling)", cpu.pl1, cpu.pl2);
+            if (TxtCpuLoad != null)
+            {
+                if (cpu.usage > 70)
+                {
+                    TxtCpuLoad.Text = string.Format("Load: {0:F0}% (HEAVY LOAD)", cpu.usage);
+                    TxtCpuLoad.Foreground = new SolidColorBrush(Color.FromRgb(245, 158, 11)); // Amber
+                }
+                else if (cpu.usage > 20)
+                {
+                    TxtCpuLoad.Text = string.Format("Load: {0:F0}% (Active)", cpu.usage);
+                    TxtCpuLoad.Foreground = new SolidColorBrush(Color.FromRgb(56, 189, 248)); // Cyan
+                }
+                else
+                {
+                    TxtCpuLoad.Text = string.Format("Load: {0:F0}% (Idle • Power Throttled)", cpu.usage);
+                    TxtCpuLoad.Foreground = new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Emerald
+                }
+            }
 
             // Update iGPU Telemetry
             if (TxtGpuWatts != null) TxtGpuWatts.Text = string.Format("{0:F1} W", gpu.GpuWatts);
+            if (TxtGpuStatus != null)
+            {
+                if (gpu.GpuWatts > 10.0)
+                {
+                    TxtGpuStatus.Text = "Status: 3D/AI Burst Active (950 MHz)";
+                    TxtGpuStatus.Foreground = new SolidColorBrush(Color.FromRgb(245, 158, 11));
+                }
+                else
+                {
+                    TxtGpuStatus.Text = "Status: Idle (350 MHz Low Power)";
+                    TxtGpuStatus.Foreground = new SolidColorBrush(Color.FromRgb(16, 185, 129));
+                }
+            }
             if (TxtGpuPolicy != null)
             {
                 string pName = gpu.Policy switch
